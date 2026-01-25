@@ -49,7 +49,7 @@ services:
       HEADLESS: ${HEADLESS:-0}
     volumes:
       - app_data:/data
-    command: ["sh", "/app/startapp.sh"]
+    command: ["bash", "/app/startapp.sh"]
     restart: "no"
 
 volumes:

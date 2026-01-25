@@ -7,7 +7,7 @@ WORKDIR /app
 
 # Tk runtime and certs (include Xvfb for headless)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends python3-tk tk ca-certificates xvfb xauth && \
+    apt-get install -y --no-install-recommends bash python3-tk tk ca-certificates xvfb xauth && \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -17,4 +17,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . /app
 
 # Start script handles DB seed + app launch
-CMD ["sh", "/app/startapp.sh"]
+CMD ["bash", "/app/startapp.sh"]

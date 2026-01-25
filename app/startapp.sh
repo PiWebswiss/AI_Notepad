@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 set -e
 
 # Seed DB if missing/empty, then run the Tk app. No DB writes after seeding.

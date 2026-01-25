@@ -34,8 +34,9 @@ chmod +x run.sh
 - Auto model pull is on by default if the model is missing; disable with `NO_AUTO_PULL=1`.
 
 ## Run (Windows)
+One-time way (run this each time; does not change your system policy):
 ```
-.\run.ps1
+powershell.exe -ExecutionPolicy Bypass -File .\run.ps1
 ```
 - GUI: start an X server (e.g., VcXsrv), disable access control, and set `DISPLAY=host.docker.internal:0.0` if needed.
 - Headless: set `HEADLESS=1`.
