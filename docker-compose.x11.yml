@@ -1,0 +1,7 @@
+services:
+  app:
+    environment:
+      XAUTHORITY: /tmp/.docker.xauth
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ${XAUTH}:/tmp/.docker.xauth:rw
