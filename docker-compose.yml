@@ -45,13 +45,10 @@ services:
       USE_LLM_NEXT_GHOST: ${USE_LLM_NEXT_GHOST:-0}
       USE_SQLITE_VOCAB: ${USE_SQLITE_VOCAB:-1}
       ALLOW_UNKNOWN_WORDS: ${ALLOW_UNKNOWN_WORDS:-0}
-      DISPLAY: ${DISPLAY}
-      HEADLESS: ${HEADLESS:-0}
     volumes:
-      - app_data:/data
-    command: ["bash", "/app/startapp.sh"]
+      - ./data:/data
+    command: ["sleep", "infinity"]
     restart: "no"
 
 volumes:
   ollama:
-  app_data:
