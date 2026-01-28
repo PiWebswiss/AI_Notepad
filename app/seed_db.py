@@ -5,96 +5,64 @@ This keeps the logic in one place instead of embedding a large Python heredoc
 inside the shell entrypoint.
 """
 
-from __future__ import annotations
+from __future__ import annotations  # allow future typing features if needed
 
-import csv
-import os
-import re
-import sqlite3
-from pathlib import Path
-from typing import Iterable, Tuple
+import os  # env vars for configuration
+import re  # regex for word validation
+import sqlite3  # built-in SQLite driver
+from pathlib import Path  # filesystem paths
 
 
-DB_PATH = Path(os.environ.get("DB_FILE", "/data/ainotepad_vocab.db"))
-INIT_DIR = Path("/app/initdb")
-SEED_SQL = INIT_DIR / "seed_sqlite.sql"
-
-
-def apply_seed_sql(conn: sqlite3.Connection) -> bool:
-    """Apply SQL seed file, stripping outer transaction statements."""
-    if not SEED_SQL.exists():
-        return False
-    sql = SEED_SQL.read_text(encoding="utf-8")
-    filtered = []
-    for line in sql.splitlines():
-        if line.strip().upper() in {"BEGIN;", "COMMIT;", "PRAGMA JOURNAL_MODE=WAL;"}:
-            continue
-        filtered.append(line)
-    conn.executescript("\n".join(filtered))
-    conn.commit()
-    return True
-
-
-def load_csv(name: str, lang: str) -> Iterable[Tuple[str, str]]:
-    path = INIT_DIR / name
-    if not path.exists():
-        return []
-    with path.open("r", encoding="utf-8", errors="ignore") as f:
-        reader = csv.reader(f)
-        for row in reader:
-            if not row:
-                continue
-            w = (row[0] or "").strip()
-            if not w or w.lower() == "word":
-                continue
-            yield (w, lang)
+DB_PATH = Path(os.environ.get("DB_FILE", "/data/ainotepad_vocab.db"))  # SQLite file path (volume-mounted)
 
 
 def seed_from_wordfreq(conn: sqlite3.Connection) -> bool:
+    """Use the wordfreq library to insert high-frequency words with language tags."""
     try:
-        import wordfreq  # type: ignore
+        import wordfreq  # type: ignore  # optional dependency pulled at runtime
     except Exception as e:
-        print(f"wordfreq not available: {e}")
-        return False
+        print(f"wordfreq not available: {e}")  # surface why seeding is skipped
+        return False  # fall back to no seeding
 
-    top_n = int(os.environ.get("WORDLIST_TOP_N", "120000"))
+    # How many of the most frequent words to pull from wordfreq (can override via WORDLIST_TOP_N env).
+    top_n = int(os.environ.get("WORDLIST_TOP_N", "200000"))  # default: grab 200k most frequent words
     if top_n <= 0:
-        print("WORDLIST_TOP_N=0; skipping wordfreq seed")
-        return False
+        print("WORDLIST_TOP_N=0; skipping wordfreq seed")  # explicit opt-out
+        return False  # nothing to do
 
-    word_re = re.compile(r"^[A-Za-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u00ff'\u2019\\-]+$")
-    freq_by_word = {}
-    lang_choice = {}
+    word_re = re.compile(r"^[A-Za-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u00ff'\u2019\\-]+$")  # allow letters/accents/'/-
+    freq_by_word = {}  # word -> frequency score
+    lang_choice = {}  # word -> (lang, freq) to remember strongest language
 
-    for lang in ("en", "fr"):
+    for lang in ("en", "fr"):  # seed English and French
         try:
-            words = wordfreq.top_n_list(lang, top_n)
+            words = wordfreq.top_n_list(lang, top_n)  # get top-N list
         except Exception as e:
-            print(f"wordfreq failed for {lang}: {e}")
-            continue
-        for w in words:
-            w = (w or "").strip().lower()
+            print(f"wordfreq failed for {lang}: {e}")  # log per-language issues
+            continue  # try next language
+        for w in words:  # iterate each candidate word
+            w = (w or "").strip().lower()  # normalize case/whitespace
             if not w or " " in w:
-                continue
+                continue  # skip empty or multi-word strings
             if not word_re.fullmatch(w):
-                continue
-            freq = int(max(1.0, wordfreq.zipf_frequency(w, lang) * 100))
-            prev = freq_by_word.get(w, 0)
+                continue  # skip tokens with invalid chars
+            freq = int(max(1.0, wordfreq.zipf_frequency(w, lang) * 100))  # convert Zipf to int score
+            prev = freq_by_word.get(w, 0)  # existing best freq
             if freq > prev:
-                freq_by_word[w] = freq
-            prev_lang = lang_choice.get(w)
+                freq_by_word[w] = freq  # keep highest freq seen
+            prev_lang = lang_choice.get(w)  # existing language choice
             if not prev_lang or freq > prev_lang[1]:
-                lang_choice[w] = (lang, freq)
+                lang_choice[w] = (lang, freq)  # prefer language with stronger score
 
     if not freq_by_word:
-        print("wordfreq returned no words; falling back to CSVs")
-        return False
+        print("wordfreq returned no words; unable to seed.")  # nothing inserted
+        return False  # signal failure
 
-    cur = conn.cursor()
-    words_rows = [(w, f) for w, f in freq_by_word.items()]
-    lang_rows = [(w, lang) for w, (lang, _) in lang_choice.items()]
+    cur = conn.cursor()  # single cursor for batch inserts
+    words_rows = [(w, f) for w, f in freq_by_word.items()]  # rows for words table
+    lang_rows = [(w, lang) for w, (lang, _) in lang_choice.items()]  # rows for language table
 
-    chunk = 2000
+    chunk = 2000  # bulk insert in chunks to avoid oversized executemany payloads
     for i in range(0, len(words_rows), chunk):
         cur.executemany(
             "INSERT INTO words(word,freq) VALUES(?,?) "
@@ -107,70 +75,42 @@ def seed_from_wordfreq(conn: sqlite3.Connection) -> bool:
             "ON CONFLICT(word) DO UPDATE SET lang = excluded.lang;",
             lang_rows[i : i + chunk],
         )
-    conn.commit()
-    print(f"Seeded {len(words_rows)} words from wordfreq into {DB_PATH}")
-    return True
+    conn.commit()  # persist inserts
+    print(f"Seeded {len(words_rows)} words from wordfreq into {DB_PATH}")  # success log
+    return True  # indicate seeding happened
 
 
 def needs_seed(conn: sqlite3.Connection) -> bool:
-    force = os.environ.get("FORCE_RESEED", "0") == "1"
+    """Return True if tables are missing or the words table is under threshold."""
+    force = os.environ.get("FORCE_RESEED", "0") == "1"  # manual override to force reseeding
     if force:
         return True
 
-    min_words_raw = os.environ.get("MIN_WORDS_THRESHOLD", "0")
+    min_words_raw = os.environ.get("MIN_WORDS_THRESHOLD", "0")  # optional lower bound for table size
     try:
-        min_words = int(min_words_raw)
+        min_words = int(min_words_raw)  # parse threshold
     except ValueError:
-        min_words = 0
+        min_words = 0  # fallback if env is invalid
 
-    cur = conn.cursor()
+    cur = conn.cursor()  # cursor for metadata checks
     cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='words';")
-    has_words = cur.fetchone() is not None
+    has_words = cur.fetchone() is not None  # words table exists?
     cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='lang_words';")
-    has_lang = cur.fetchone() is not None
+    has_lang = cur.fetchone() is not None  # lang table exists?
     if not has_words or not has_lang:
-        return True
+        return True  # need to seed if schema missing
     try:
         cur.execute("SELECT COUNT(1) FROM words;")
-        count = cur.fetchone()[0]
+        count = cur.fetchone()[0]  # how many words currently stored
     except Exception:
-        return True
+        return True  # any query failure => reseed
     if min_words > 0:
-        return count < min_words
-    return count == 0
-
-
-def seed_from_csv(conn: sqlite3.Connection) -> None:
-    words = list(load_csv("words_en.csv", "en")) + list(load_csv("words_fr.csv", "fr"))
-    seen = {}
-    dedup_words = []
-    dedup_lang = []
-    for w, lang in words:
-        key = w.lower()
-        if key in seen:
-            continue
-        seen[key] = lang
-        dedup_words.append((w,))
-        dedup_lang.append((w, lang))
-
-    if dedup_words:
-        cur = conn.cursor()
-        cur.executemany(
-            "INSERT INTO words(word,freq) VALUES(?,1) "
-            "ON CONFLICT(word) DO UPDATE SET freq = excluded.freq;",
-            dedup_words,
-        )
-        cur.executemany(
-            "INSERT INTO lang_words(word,lang) VALUES(?,?) "
-            "ON CONFLICT(word) DO UPDATE SET lang = excluded.lang;",
-            dedup_lang,
-        )
-        conn.commit()
-    print(f"Seeded {len(dedup_words)} words into {DB_PATH}")
+        return count < min_words  # under threshold => seed
+    return count == 0  # seed if empty
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
-    cur = conn.cursor()
+    cur = conn.cursor()  # cursor for DDL
     cur.executescript(
         """
         CREATE TABLE IF NOT EXISTS words(
@@ -189,36 +129,31 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         );
         """
     )
-    conn.commit()
+    conn.commit()  # persist schema changes
 
 
 def main() -> None:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("PRAGMA journal_mode=WAL;")
-    cur.fetchone()
+    """Orchestrate seeding: skip when data exists; otherwise create schema and seed."""
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)  # ensure directory exists
+    conn = sqlite3.connect(DB_PATH)  # open/create database file
+    cur = conn.cursor()  # cursor for pragmas
+    cur.execute("PRAGMA journal_mode=WAL;")  # enable WAL for concurrency
+    cur.fetchone()  # materialize pragma result
 
     if not needs_seed(conn):
         print(f"Using existing SQLite vocab at {DB_PATH}")
-        conn.close()
-        return
+        conn.close()  # cleanup connection
+        return  # nothing else to do
 
-    ensure_schema(conn)
-    applied_sql = apply_seed_sql(conn)
-    used_wordfreq = seed_from_wordfreq(conn)
-    if not used_wordfreq:
-        cur.execute("SELECT COUNT(1) FROM words;")
-        count = cur.fetchone()[0]
-        if count == 0:
-            seed_from_csv(conn)
-        elif applied_sql:
-            print(f"Applied SQL seed from {SEED_SQL}")
-    else:
-        if applied_sql:
-            print(f"Applied SQL seed from {SEED_SQL}")
-    conn.close()
+    # Create tables up front so inserts won't fail.
+    ensure_schema(conn)  # idempotent DDL
+
+    seeded = seed_from_wordfreq(conn)  # attempt seeding
+    if not seeded:
+        print("Seeding skipped: wordfreq unavailable or returned no data.")  # informative warning
+    conn.close()  # always close
 
 
 if __name__ == "__main__":
-    main()
+    main()  # run when invoked directly
+

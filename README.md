@@ -13,6 +13,23 @@ powershell -ExecutionPolicy Bypass -File .\run.ps1
 - Starts the Ollama container (pulls the model if missing), creates/uses `.venv`, seeds `.\data\ainotepad_vocab.db` if needed, then opens the Tk window.
 - DB and Ollama stay in Docker; GUI is a normal Windows window.
 
+## Run on Linux (native GUI)
+Prereqs: Docker, Python 3 + venv.
+```
+docker compose up -d ollama
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r app/requirements.txt
+export DB_FILE="$PWD/data/ainotepad_vocab.db"
+export OLLAMA_HOST="http://localhost:11434"
+python app/seed_db.py
+python app/app.py
+```
+- Ollama stays in Docker; GUI runs on the host.
+- Model selection: set `OLLAMA_MODEL` in `.env` (default `gemma3:1b`) before starting.
+- Data lives in `./data` on the host; containers see it via bind mount.
+
 ## Cleanup / rollback
 ```
 powershell -ExecutionPolicy Bypass -File .\cleanup_native.ps1

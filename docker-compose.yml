@@ -1,54 +1,53 @@
 services:
-  ollama:
+  ollama:                                  # runs the Ollama model server
     image: ollama/ollama:latest
     container_name: AI_Notepad-ollama
     ports:
-      - "11434:11434"
+      - "11434:11434"                      # expose Ollama API to host
     volumes:
-      - ollama:/root/.ollama
+      - ollama:/root/.ollama               # persist downloaded models
     restart: unless-stopped
 
-  # télécharge le modèle 1x puis s'arrête
-  ollama_init:
+  ollama_init:                             # one-shot job to pull the model, then exit
     image: ollama/ollama:latest
     container_name: AI_Notepad-ollama-init
-    profiles: ["init"]
+    profiles: ["init"]                     # run with: docker compose --profile init up
     depends_on:
       - ollama
     environment:
-      - OLLAMA_HOST=http://ollama:11434
-      - OLLAMA_MODEL=${OLLAMA_MODEL}
+      - OLLAMA_HOST=http://ollama:11434    # target the running Ollama service
+      - OLLAMA_MODEL=${OLLAMA_MODEL}       # model name to download
     entrypoint: ["/bin/sh", "-lc", "ollama pull $OLLAMA_MODEL"]
     restart: "no"
 
-  app:
-    build: ./app
+  app:                                     # main application container
+    build: ./app                           # build from local Dockerfile
     container_name: AI_Notepad
     depends_on:
       - ollama
     environment:
-      DB_FILE: /data/ainotepad_vocab.db
-      OLLAMA_HOST: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL}
-      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-180}
-      MODEL_CHECK_INTERVAL: ${MODEL_CHECK_INTERVAL:-30}
-      SHOW_MODEL_ERRORS: ${SHOW_MODEL_ERRORS:-1}
-      LLM_SERIAL: ${LLM_SERIAL:-1}
-      OLLAMA_NUM_PREDICT_MIN: ${OLLAMA_NUM_PREDICT_MIN:-200}
-      OLLAMA_NUM_PREDICT_MAX: ${OLLAMA_NUM_PREDICT_MAX:-900}
-      WORDLIST_TOP_N: ${WORDLIST_TOP_N:-120000}
-      FORCE_RESEED: ${FORCE_RESEED:-0}
-      MIN_WORDS_THRESHOLD: ${MIN_WORDS_THRESHOLD:-0}
-      ENABLE_FUZZY: ${ENABLE_FUZZY:-0}
-      DB_TOP_WORDS: ${DB_TOP_WORDS:-150000}
-      DB_TOP_BIGRAMS: ${DB_TOP_BIGRAMS:-80000}
-      USE_LLM_NEXT_GHOST: ${USE_LLM_NEXT_GHOST:-0}
-      USE_SQLITE_VOCAB: ${USE_SQLITE_VOCAB:-1}
-      ALLOW_UNKNOWN_WORDS: ${ALLOW_UNKNOWN_WORDS:-0}
+      DB_FILE: /data/ainotepad_vocab.db           # SQLite path inside container
+      OLLAMA_HOST: http://ollama:11434            # Ollama endpoint
+      OLLAMA_MODEL: ${OLLAMA_MODEL}               # model to use
+      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-180}      # request timeout (seconds)
+      MODEL_CHECK_INTERVAL: ${MODEL_CHECK_INTERVAL:-30}  # poll interval for model
+      SHOW_MODEL_ERRORS: ${SHOW_MODEL_ERRORS:-1}         # log model errors (1=yes)
+      LLM_SERIAL: ${LLM_SERIAL:-1}                      # limit concurrent prompts
+      OLLAMA_NUM_PREDICT_MIN: ${OLLAMA_NUM_PREDICT_MIN:-200}  # min tokens
+      OLLAMA_NUM_PREDICT_MAX: ${OLLAMA_NUM_PREDICT_MAX:-900}  # max tokens
+      WORDLIST_TOP_N: ${WORDLIST_TOP_N:-120000}               # vocab size for seeding
+      FORCE_RESEED: ${FORCE_RESEED:-0}                        # force rebuild of vocab
+      MIN_WORDS_THRESHOLD: ${MIN_WORDS_THRESHOLD:-0}          # reseed if below this
+      ENABLE_FUZZY: ${ENABLE_FUZZY:-0}                        # toggle fuzzy search
+      DB_TOP_WORDS: ${DB_TOP_WORDS:-150000}                   # export limit for words
+      DB_TOP_BIGRAMS: ${DB_TOP_BIGRAMS:-80000}                # export limit for bigrams
+      USE_LLM_NEXT_GHOST: ${USE_LLM_NEXT_GHOST:-0}            # feature flag
+      USE_SQLITE_VOCAB: ${USE_SQLITE_VOCAB:-1}                # use SQLite-backed vocab
+      ALLOW_UNKNOWN_WORDS: ${ALLOW_UNKNOWN_WORDS:-0}          # allow out-of-vocab words
     volumes:
-      - ./data:/data
-    command: ["sleep", "infinity"]
-    restart: "no"
+      - ./data:/data                                   # persist DB on host
+    command: ["sleep", "infinity"]                     # keep container running for debugging
+    restart: "no"                                      # do not auto-restart
 
 volumes:
-  ollama:
+  ollama:                                          # named volume for Ollama data
