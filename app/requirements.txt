@@ -1,3 +1,5 @@
 # Runtime dependencies for the app
+# Declare Python dependency `ollama` so it gets installed into the virtual environment.
 ollama
+# Declare Python dependency `wordfreq` so it gets installed into the virtual environment.
 wordfreq
