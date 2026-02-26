@@ -2,6 +2,12 @@
 $ErrorActionPreference = "Stop"
 
 # Run AI Notepad locally (native Tk UI), with Ollama and DB in Docker.
+# Execution flow:
+# 1) start Ollama service
+# 2) ensure the selected model exists
+# 3) prepare Python venv + deps
+# 4) seed/migrate SQLite vocab DB
+# 5) launch the desktop app
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
 $appDir = Join-Path $root "app"
@@ -18,6 +24,7 @@ Write-Host "Starting Ollama container..."
 docker compose up -d ollama
 
 # Pull model if it is not already available.
+# We retry list for a short period because Ollama may need a few seconds to boot.
 Write-Host "Ensuring model '$model' is available in Ollama..."
 $names = @()
 for ($i = 0; $i -lt 20; $i++) {
@@ -36,6 +43,7 @@ if ($names -notcontains $model) {
 }
 
 # Create local venv if needed.
+# We keep app dependencies isolated from the system Python.
 $venvPath = Join-Path $root ".venv"
 $pythonDir = Join-Path $venvPath "Scripts"
 $python = Join-Path $pythonDir "python.exe"
@@ -53,6 +61,7 @@ Write-Host "Installing Python dependencies..."
 & $python -m pip install -r (Join-Path $appDir "requirements.txt")
 
 # Configure app env and seed DB if needed.
+# DB_FILE points to the project-local persistent data folder.
 $env:DB_FILE = Join-Path (Join-Path $root "data") "ainotepad_vocab.db"
 $env:OLLAMA_HOST = "http://localhost:11434"
 New-Item -ItemType Directory -Force -Path (Split-Path $env:DB_FILE) | Out-Null

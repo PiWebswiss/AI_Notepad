@@ -1,7 +1,7 @@
-# AI notepad:
+# AI notepad
 # - Fast LOCAL word suggestions (popup + grey ghost suffix)
 # - Optional SQLite learning (persist words + bigrams across runs)
-# - LLM used for:
+# - LLM used for
 #   1) grammar/spelling correction (auto preview popup, TAB to apply)
 #   2) optional Copilot-like short continuation (grey ghost text)
 
@@ -29,8 +29,15 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 import ollama  
 
+# File reading guide
+# - Config section defines runtime knobs and defaults.
+# - Utility section handles text normalization and language filtering.
+# - AINotepad class owns UI state and orchestrates suggestion/correction flows.
+# - SQLite is loaded at startup and then used as an in-memory scoring source.
+# - LLM calls are always done in background threads with stale-result guards.
 
 def env_flag(name: str, default: bool = False) -> bool:
+    """Parse common truthy env values (1/true/yes/on)."""
     val = os.environ.get(name)
     if val is None:
         return default
@@ -40,102 +47,108 @@ def env_flag(name: str, default: bool = False) -> bool:
 # ================= CONFIG =================
 # Choose the default model used for text generation and corrections.
 MODEL = os.environ.get("OLLAMA_MODEL", "gemma3:1b")
-# Point requests to the Ollama server endpoint.
+# Use this URL to connect to the Ollama server.
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 try:
-    # Limit request wait time so stalled model calls do not freeze the app.
+    # Set the request timeout in seconds.
     OLLAMA_TIMEOUT = float(os.environ.get("OLLAMA_TIMEOUT", "180"))
 except ValueError:
-    # Limit request wait time so stalled model calls do not freeze the app.
+    # Keep a safe default timeout when the env value is invalid.
     OLLAMA_TIMEOUT = 180.0
 try:
-    # Control how often this check runs to reduce repeated work.
+    # Define how often model availability is checked.
     MODEL_CHECK_INTERVAL = float(os.environ.get("MODEL_CHECK_INTERVAL", "30"))
 except ValueError:
-    # Control how often this check runs to reduce repeated work.
+    # Keep a safe default interval when the env value is invalid.
     MODEL_CHECK_INTERVAL = 30.0
-# Toggle the llm serial behavior on or off without changing code paths.
+# Serialize model calls when enabled.
 LLM_SERIAL = env_flag("LLM_SERIAL", True)
 try:
-    # Keep completions short to avoid meaning drift
+    # Set the minimum generation budget for model output.
     OLLAMA_NUM_PREDICT_MIN = int(os.environ.get("OLLAMA_NUM_PREDICT_MIN", "80"))
-    # Bound generation length to keep model edits concise and relevant.
+    # Set the maximum generation budget for model output.
     OLLAMA_NUM_PREDICT_MAX = int(os.environ.get("OLLAMA_NUM_PREDICT_MAX", "240"))
 except ValueError:
     OLLAMA_NUM_PREDICT_MIN = 200
-    # Bound generation length to keep model edits concise and relevant.
+    # Use fallback limits when env values cannot be parsed.
     OLLAMA_NUM_PREDICT_MAX = 900
 if OLLAMA_NUM_PREDICT_MAX < OLLAMA_NUM_PREDICT_MIN:
-    # Bound generation length to keep model edits concise and relevant.
+    # Keep max at least equal to min.
     OLLAMA_NUM_PREDICT_MAX = OLLAMA_NUM_PREDICT_MIN
 
 # --- Behavior toggles ---
-# Point requests to the Ollama server endpoint.
-USE_LLM_NEXT_GHOST = env_flag("USE_LLM_NEXT_GHOST", False)     # Copilot-like continuation
-# Toggle the llm word suggestions behavior on or off without changing code paths.
+# Enable Copilot like continuation ghost text.
+USE_LLM_NEXT_GHOST = env_flag("USE_LLM_NEXT_GHOST", False)
+# Enable or disable model based word suggestions.
 USE_LLM_WORD_SUGGESTIONS = False
-# Toggle the sqlite vocab behavior on or off without changing code paths.
-USE_SQLITE_VOCAB = env_flag("USE_SQLITE_VOCAB", True)          # Persist learned words/bigrams across runs
+# Enable SQLite vocabulary loading and usage.
+USE_SQLITE_VOCAB = env_flag("USE_SQLITE_VOCAB", True)
 
 # --- Debounce times ---
+# Delay before requesting word suggestions after typing.
 WORD_DEBOUNCE_MS = 140
+# Delay before requesting block correction after typing.
 FIX_DEBOUNCE_MS  = 650
-# Point requests to the Ollama server endpoint.
+# Delay before requesting next ghost continuation.
 NEXT_GHOST_DEBOUNCE_MS = 520
 
 # --- Context sizes ---
-# Cap max context chars size to keep prompts and UI updates lightweight.
+# Maximum context size used for prompts.
 MAX_CONTEXT_CHARS = 1800
-# Cap max fix chars size to keep prompts and UI updates lightweight.
+# Maximum block size used for correction requests.
 MAX_FIX_CHARS     = 9000
+# Chunk size used by whole document correction.
 DOC_CHUNK_CHARS   = 1600
 
 # --- Vocab learning window ---
-# Configure the vocab rebuild ms delay in milliseconds.
+# Delay before rebuilding local vocabulary from typed text.
 VOCAB_REBUILD_MS = 1200
-# Restrict vocabulary learning to recent text for faster updates.
+# Use only the document tail for local vocabulary learning.
 VOCAB_WINDOW_CHARS = 25000
 
 # --- Word suggestions ---
+# Minimum fragment length before showing suggestions.
 MIN_WORD_FRAGMENT = 2
-# Limit how many suggestions are shown to avoid cluttering the UI.
+# Maximum items shown in the suggestions popup.
 POPUP_MAX_ITEMS = 3
+# Prefix length used for fast local candidate lookup.
 PREFIX_INDEX_LEN = 2
+# Run fuzzy matching only when no strong prefix match is found.
 FUZZY_ONLY_IF_NO_PREFIX = True
-# Toggle the fuzzy behavior on or off without changing code paths.
+# Enable fuzzy matching for spelling tolerance.
 ENABLE_FUZZY = os.environ.get("ENABLE_FUZZY", "0") == "1"
-# Toggle the unknown words behavior on or off without changing code paths.
+# Allow words missing from language sets when enabled.
 ALLOW_UNKNOWN_WORDS = env_flag("ALLOW_UNKNOWN_WORDS", False)
 
 # --- Copilot-like ghost continuation ---
-# Point requests to the Ollama server endpoint.
+# Maximum characters shown in a ghost continuation.
 NEXT_GHOST_MAX_CHARS = 48
-# Point requests to the Ollama server endpoint.
+# Minimum typed context required before asking continuation.
 NEXT_GHOST_MIN_INPUT = 18
-# Point requests to the Ollama server endpoint.
+# Maximum context sent to the continuation prompt.
 NEXT_GHOST_CONTEXT_CHARS = 1200
 
-# After accepting a suggestion (TAB/click), insert a space if needed:
+# Insert a space after accepting a suggestion when needed.
 AUTO_SPACE_AFTER_ACCEPT = True
 PUNCT_CHARS = set(",.;:!?)]}\"'’”")
+# Remove space before punctuation when enabled.
 NO_SPACE_BEFORE_PUNCT = True
 
-# Fuzzy matching for dyslexia:
+# Fuzzy matching thresholds.
 FUZZY_MIN_RATIO = 0.72
 FUZZY_MAX_LEN_DIFF = 3
 
 # SQLite
-# Point to the SQLite file that stores learned vocabulary data.
+# SQLite database file path.
 DB_FILE = os.environ.get("DB_FILE", "/data/ainotepad_vocab.db")
-# Configure the flush ms delay in milliseconds.
+# Flush delay in milliseconds for queued writes.
 DB_FLUSH_MS = 2500
-# Limit how much frequency data is loaded from SQLite into memory.
+# Maximum words loaded from SQLite into memory.
 DB_TOP_WORDS = int(os.environ.get("DB_TOP_WORDS", "150000"))
-# Limit how much frequency data is loaded from SQLite into memory.
+# Maximum bigrams loaded from SQLite into memory.
 DB_TOP_BIGRAMS = int(os.environ.get("DB_TOP_BIGRAMS", "80000"))
 
-# If you want debugging text in the status bar, set to 1
-# Toggle the model errors in status behavior on or off without changing code paths.
+# Show model errors in the status bar when enabled.
 SHOW_MODEL_ERRORS_IN_STATUS = os.environ.get("SHOW_MODEL_ERRORS", "1") == "1"
 
 
@@ -162,6 +175,7 @@ FONT_EDIT = ("Cascadia Code", 14)
 WORD_CHAR_RE = re.compile(r"[A-Za-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u00ff'’\-]")
 
 def strip_accents(s: str) -> str:
+    """Return accent-stripped representation used for fuzzy matching/indexing."""
     return "".join(ch for ch in unicodedata.normalize("NFD", s) if unicodedata.category(ch) != "Mn")
 
 
@@ -169,7 +183,7 @@ LANG_SETS_CACHE = None
 
 
 def load_lang_sets():
-    """Load language word sets from the DB (lang_words). Cached after first load."""
+    """Load language word sets from normalized DB table words(word, lang)."""
     global LANG_SETS_CACHE
     if LANG_SETS_CACHE is not None:
         return LANG_SETS_CACHE
@@ -178,9 +192,11 @@ def load_lang_sets():
     try:
         conn = sqlite3.connect(DB_FILE)
         cur = conn.cursor()
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='lang_words';")
-        if cur.fetchone():
-            for word, lang in cur.execute("SELECT word, lang FROM lang_words;"):
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='words';")
+        has_words = cur.fetchone() is not None
+        if has_words:
+            # Language metadata is stored directly in words.lang.
+            for word, lang in cur.execute("SELECT word, lang FROM words WHERE lang IN ('en','fr');"):
                 w = (word or "").strip().lower()
                 l = (lang or "").strip().lower()
                 if w and l in ("en", "fr"):
@@ -194,7 +210,7 @@ def load_lang_sets():
 
 
 def detect_lang(text: str) -> str:
-    """Detect language (fr/en) using DB-backed lang_words entries."""
+    """Detect language (fr/en) using DB-backed language entries."""
     tokens = re.findall(r"[A-Za-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u00ff']+", (text or "").lower())
     lang_sets = load_lang_sets()
     if not lang_sets["en"] and not lang_sets["fr"]:
@@ -249,6 +265,7 @@ _OLLAMA_CLIENT = None
 
 
 def get_ollama_client():
+    """Create and cache a single Ollama client instance."""
     global _OLLAMA_CLIENT
     if _OLLAMA_CLIENT is None:
         try:
@@ -259,6 +276,7 @@ def get_ollama_client():
 
 
 def uniq_keep_order(items):
+    """Remove duplicates while preserving first-seen order."""
     seen = set()
     out = []
     for item in items:
@@ -273,6 +291,7 @@ def uniq_keep_order(items):
 
 
 def clean_llm_text(text: str) -> str:
+    """Normalize model output and strip common wrapper artifacts."""
     if not text:
         return ""
     t = text.replace("\r\n", "\n").replace("\r", "\n").strip()
@@ -293,6 +312,7 @@ def clean_llm_text(text: str) -> str:
 
 
 def looks_like_chatbot_output(text: str) -> bool:
+    """Detect generic assistant/meta replies that are invalid as direct edits."""
     t = (text or "").strip()
     if not t:
         return False
@@ -320,6 +340,7 @@ def looks_like_chatbot_output(text: str) -> bool:
 
 
 def post_fix_spacing(text: str) -> str:
+    """Apply lightweight punctuation spacing cleanup after correction."""
     if not text:
         return text
     t = text.replace("\r\n", "\n").replace("\r", "\n")
@@ -330,6 +351,7 @@ def post_fix_spacing(text: str) -> str:
 
 
 def is_lang_word(word: str, lang: str) -> bool:
+    """Filter candidate words by detected language and configuration flags."""
     w = (word or "").strip().lower()
     if not w:
         return False
@@ -352,6 +374,12 @@ def is_lang_word(word: str, lang: str) -> bool:
 # Declare `AINotepad` as the main object that coordinates related state and methods.
 class AINotepad(tk.Tk):
     def __init__(self):
+        """Initialize UI, runtime state, and in-memory scoring data."""
+        # Runtime model:
+        # 1) Keep UI responsive.
+        # 2) Do fast local suggestions from vocab/bigrams.
+        # 3) Ask LLM asynchronously for richer suggestions/fixes.
+        # 4) Ignore stale async results via request id + doc version.
         super().__init__()
         self.title("AI Notepad")
         self.geometry("1500x1000")
@@ -453,42 +481,70 @@ class AINotepad(tk.Tk):
 
     # ---------- SQLite ----------
     def _db_open_and_load(self):
+        """Open SQLite DB, ensure schema/indexes, then load vocab and bigrams."""
         try:
             # Update instance state field `db` so later UI logic can reuse it.
             self.db = sqlite3.connect(DB_FILE)
-
             cur = self.db.cursor()
+            cur.execute("PRAGMA foreign_keys=ON;")
+
+            # Ensure normalized schema exists for fresh databases.
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS words(
-                    word TEXT PRIMARY KEY,
-                    freq INTEGER NOT NULL
+                    id INTEGER PRIMARY KEY,
+                    word TEXT NOT NULL UNIQUE,
+                    freq INTEGER NOT NULL DEFAULT 0,
+                    lang TEXT NOT NULL DEFAULT 'en' CHECK(lang IN ('en','fr'))
                 );
             """)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS bigrams(
-                    prev TEXT NOT NULL,
-                    word TEXT NOT NULL,
-                    freq INTEGER NOT NULL,
-                    PRIMARY KEY(prev, word)
+                    prev_id INTEGER NOT NULL,
+                    next_id INTEGER NOT NULL,
+                    freq INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(prev_id, next_id),
+                    FOREIGN KEY(prev_id) REFERENCES words(id) ON DELETE CASCADE,
+                    FOREIGN KEY(next_id) REFERENCES words(id) ON DELETE CASCADE
                 );
             """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_words_word ON words(word);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_words_lang ON words(lang);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_words_freq ON words(freq DESC);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_words_lang_freq ON words(lang, freq DESC);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_bigrams_prev_id ON bigrams(prev_id);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_bigrams_next_id ON bigrams(next_id);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_bigrams_prev_freq ON bigrams(prev_id, freq DESC);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_bigrams_freq ON bigrams(freq DESC);")
             self.db.commit()
 
             cur.execute("SELECT word, freq FROM words ORDER BY freq DESC LIMIT ?;", (DB_TOP_WORDS,))
             self.vocab.update({w: int(f) for (w, f) in cur.fetchall()})
 
-            cur.execute("SELECT prev, word, freq FROM bigrams ORDER BY freq DESC LIMIT ?;", (DB_TOP_BIGRAMS,))
+            # Normalized bigrams store ids, so join back to words for runtime scoring.
+            cur.execute(
+                """
+                SELECT pw.word, nw.word, b.freq
+                FROM bigrams b
+                JOIN words pw ON pw.id = b.prev_id
+                JOIN words nw ON nw.id = b.next_id
+                ORDER BY b.freq DESC
+                LIMIT ?;
+                """,
+                (DB_TOP_BIGRAMS,),
+            )
             self.bigram.update({(a, b): int(f) for (a, b, f) in cur.fetchall()})
         except Exception:
             # Update instance state field `db` so later UI logic can reuse it.
             self.db = None
 
     def _db_queue_update(self, word_counts: Counter, bigram_counts: Counter):
+        """No-op: runtime writes are intentionally disabled in read-only mode."""
         # Read-only: no DB updates after initial seed
         # Exit the function when no further work is needed.
         return
 
     def _db_flush(self):
+        """Clear pending in-memory write queues (kept for compatibility)."""
         # Read-only: no DB writes during app runtime
         # Update instance state field `_after_db_flush` so later UI logic can reuse it.
         self._after_db_flush = None
@@ -497,6 +553,7 @@ class AINotepad(tk.Tk):
 
     # ---------------- UI ----------------
     def _build_ui(self):
+        """Build main window, editor, suggestion popup, and fix preview popup."""
         top = tk.Frame(self, bg=PANEL, highlightthickness=1, highlightbackground=BORDER)
         top.pack(side="top", fill="x")
 
@@ -706,6 +763,7 @@ class AINotepad(tk.Tk):
 
     # ---------------- Keys ----------------
     def _bind_keys(self):
+        """Wire global and editor shortcuts to their handlers."""
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self.bind("<Control-n>", lambda e: self.new_file())
@@ -747,6 +805,7 @@ class AINotepad(tk.Tk):
 
     # ---------------- File ops ----------------
     def confirm_discard_changes(self) -> bool:
+        """Ask whether modified content should be saved before destructive actions."""
         if self.text.edit_modified():
             res = messagebox.askyesnocancel("Unsaved changes", "Save changes?")
             if res is None:
@@ -756,6 +815,7 @@ class AINotepad(tk.Tk):
         return True
 
     def new_file(self):
+        """Start a new empty document and reset pending AI state."""
         if not self.confirm_discard_changes():
             # Exit the function when no further work is needed.
             return
@@ -766,6 +826,7 @@ class AINotepad(tk.Tk):
         self.clear_ai()
 
     def open_file(self):
+        """Open a text file into the editor and clear transient AI overlays."""
         if not self.confirm_discard_changes():
             # Exit the function when no further work is needed.
             return
@@ -789,6 +850,7 @@ class AINotepad(tk.Tk):
         self.clear_ai()
 
     def save_file(self) -> bool:
+        """Save buffer to the current path (or delegate to save_as)."""
         if not self.filepath:
             return self.save_as()
         try:
@@ -803,6 +865,7 @@ class AINotepad(tk.Tk):
             return False
 
     def save_as(self) -> bool:
+        """Prompt for destination path and save the current document."""
         path = filedialog.asksaveasfilename(
             defaultextension=".txt",
 
@@ -815,6 +878,7 @@ class AINotepad(tk.Tk):
         return self.save_file()
 
     def on_close(self):
+        """Close window only after unsaved-check and resource cleanup."""
         if self.confirm_discard_changes():
             try:
                 self._db_flush()
@@ -829,6 +893,7 @@ class AINotepad(tk.Tk):
 
     # ---------------- Helpers ----------------
     def set_status(self, txt: str):
+        """Update status bar, optionally hiding runtime error details."""
         if SHOW_MODEL_ERRORS_IN_STATUS:
             # Update instance state field `status.config(text` so later UI logic can reuse it.
             self.status.config(text=txt)
@@ -838,6 +903,7 @@ class AINotepad(tk.Tk):
             self.status.config(text=f"Model: {MODEL}")
 
     def _report_model_error(self, err: Exception):
+        """Display transient model errors in status bar."""
         if not SHOW_MODEL_ERRORS_IN_STATUS:
             # Exit the function when no further work is needed.
             return
@@ -857,11 +923,13 @@ class AINotepad(tk.Tk):
         self.after(0, ui)
 
     def _predict_limit(self, text_len: int) -> int:
+        """Compute bounded generation budget from source text size."""
         # Keep output terse to discourage rewrites; scale gently with input length.
         base = max(40, int(text_len / 3))
         return max(OLLAMA_NUM_PREDICT_MIN, min(OLLAMA_NUM_PREDICT_MAX, base))
 
     def _ensure_model_available(self) -> bool:
+        """Check and cache availability of the configured Ollama model."""
         now = time.monotonic()
         if self._model_available is True and (now - self._model_checked_at) < MODEL_CHECK_INTERVAL:
             return True
@@ -897,6 +965,7 @@ class AINotepad(tk.Tk):
         return True
 
     def _ollama_chat(self, messages, options):
+        """Single call path for Ollama requests with error propagation."""
         try:
             if not self._ensure_model_available():
                 # Surface this error so callers can stop or recover appropriately.
@@ -913,6 +982,7 @@ class AINotepad(tk.Tk):
             raise
 
     def clear_ai(self):
+        """Hide popups/ghost and reset correction bookkeeping."""
         self.hide_fix_popup()
         self.hide_word_popup()
         self.hide_ghost()
@@ -930,17 +1000,21 @@ class AINotepad(tk.Tk):
         self.fix_version = -1
 
     def update_lang(self):
+        """Detect active language from recent text before the caret."""
         before = self.text.get("1.0", "insert")[-900:]
         # Update instance state field `lang` so later UI logic can reuse it.
         self.lang = detect_lang(before)
 
     def get_context(self):
+        """Return recent full-document context for prompting."""
         return self.text.get("1.0", "end-1c")[-MAX_CONTEXT_CHARS:]
 
     def get_cursor_context(self):
+        """Return recent context only before the insertion point."""
         return self.text.get("1.0", "insert")[-MAX_CONTEXT_CHARS:]
 
     def get_prev_word(self):
+        """Return token preceding current word fragment for bigram scoring."""
         # Capture text positions used to target edits and highlight ranges accurately.
         insert = self.text.index("insert")
         before = self.text.get("1.0", insert)[-240:]
@@ -950,6 +1024,7 @@ class AINotepad(tk.Tk):
         return tokens[-2].lower()
 
     def get_word_under_cursor(self):
+        """Resolve word boundaries at caret and return full word + left fragment."""
         # Capture text positions used to target edits and highlight ranges accurately.
         insert = self.text.index("insert")
         # Capture text positions used to target edits and highlight ranges accurately.
@@ -994,6 +1069,7 @@ class AINotepad(tk.Tk):
 
     # ---------------- Ghost ----------------
     def hide_ghost(self):
+        """Hide inline ghost suggestion text."""
         # Update instance state field `ghost.config(text` so later UI logic can reuse it.
         self.ghost.config(text="")
         self.ghost.place_forget()
@@ -1001,6 +1077,7 @@ class AINotepad(tk.Tk):
         self.ghost_mode = "none"
 
     def update_ghost_position(self):
+        """Keep ghost label anchored to current cursor location."""
         if not self.ghost.cget("text"):
             # Exit the function when no further work is needed.
             return
@@ -1014,6 +1091,7 @@ class AINotepad(tk.Tk):
         self.ghost.place(x=x + 1, y=y - 1)
 
     def set_ghost(self, text: str, mode: str):
+        """Show ghost text in either `word` or `next` mode."""
         text = text or ""
         if not text.strip():
             self.hide_ghost()
@@ -1026,6 +1104,7 @@ class AINotepad(tk.Tk):
         self.update_ghost_position()
 
     def _prepare_next_ghost(self, before_text: str, suggestion: str) -> str:
+        """Clean continuation and remove overlap with text already typed."""
         before_text = before_text or ""
         suggestion = clean_llm_text(suggestion or "")
         if looks_like_chatbot_output(suggestion):
@@ -1039,6 +1118,7 @@ class AINotepad(tk.Tk):
         if len(suggestion) < 2:
             return ""
 
+        # Remove duplicated prefix when model repeats the current tail.
         tail = before_text[-(NEXT_GHOST_MAX_CHARS * 2):]
         overlap = min(len(tail), len(suggestion))
         for k in range(overlap, 0, -1):
@@ -1060,6 +1140,7 @@ class AINotepad(tk.Tk):
 
     # ---------------- Auto-space after accept ----------------
     def _auto_space_after_accept(self):
+        """Insert a trailing space after accepted word suggestion when safe."""
         if not AUTO_SPACE_AFTER_ACCEPT:
             # Exit the function when no further work is needed.
             return
@@ -1073,6 +1154,7 @@ class AINotepad(tk.Tk):
         self.text.insert("insert", " ")
 
     def _maybe_remove_space_before_punct(self, event):
+        """Delete pre-punctuation space for cleaner typography."""
         if not NO_SPACE_BEFORE_PUNCT:
             # Exit the function when no further work is needed.
             return
@@ -1089,6 +1171,7 @@ class AINotepad(tk.Tk):
 
     # ---------------- Word popup ----------------
     def hide_word_popup(self):
+        """Hide candidate popup and clear navigation state."""
         self.word_popup.place_forget()
         # Update instance state field `word_items` so later UI logic can reuse it.
         self.word_items = []
@@ -1099,6 +1182,7 @@ class AINotepad(tk.Tk):
         self._update_hint()
 
     def show_word_popup(self, items, word_start, word_end, full_word, frag):
+        """Display ranked word candidates and sync ghost suffix preview."""
         items = uniq_keep_order(items)[:POPUP_MAX_ITEMS]
         if not items:
             self.hide_word_popup()
@@ -1139,6 +1223,7 @@ class AINotepad(tk.Tk):
             self.hide_ghost()
 
     def reposition_word_popup(self):
+        """Reposition popup under caret on move/scroll."""
         if not self.word_items:
             # Exit the function when no further work is needed.
             return
@@ -1152,6 +1237,7 @@ class AINotepad(tk.Tk):
         self.word_popup.place(x=x, y=y + h + 6)
 
     def accept_word(self, idx=0):
+        """Replace current token with selected candidate."""
         if not self.word_items or idx < 0 or idx >= len(self.word_items):
             # Exit the function when no further work is needed.
             return
@@ -1181,6 +1267,7 @@ class AINotepad(tk.Tk):
         self.text.focus_set()
 
     def on_up(self, event):
+        """Move suggestion selection up."""
         if not self.word_items:
             return None
         # Update instance state field `word_idx` so later UI logic can reuse it.
@@ -1194,6 +1281,7 @@ class AINotepad(tk.Tk):
         return "break"
 
     def on_down(self, event):
+        """Move suggestion selection down."""
         if not self.word_items:
             return None
         # Update instance state field `word_idx` so later UI logic can reuse it.
@@ -1207,6 +1295,7 @@ class AINotepad(tk.Tk):
         return "break"
 
     def on_ctrl_space(self):
+        """Cycle current suggestions or force a new suggestion request."""
         if self.word_items:
             # Update instance state field `word_idx` so later UI logic can reuse it.
             self.word_idx = (self.word_idx + 1) % len(self.word_items)
@@ -1220,6 +1309,7 @@ class AINotepad(tk.Tk):
         self.request_word_suggestions(force=True)
 
     def _update_hint(self):
+        """Refresh footer hint text with current word-candidate selection."""
         base = "TAB apply fix / accept ghost | Ctrl+Space cycle word | Ctrl+Shift+Enter correct ALL (preview) | ESC close"
         if self.word_items:
             parts = []
@@ -1232,6 +1322,7 @@ class AINotepad(tk.Tk):
 
     # ---------------- TAB ----------------
     def on_tab(self, event):
+        """Priority accept: fix preview, then word suggestion, then ghost text."""
         if self.fix_popup.winfo_viewable() and self.fix_corrected and self.fix_start and self.fix_end:
             self.apply_fix()
             return "break"
@@ -1255,6 +1346,7 @@ class AINotepad(tk.Tk):
 
     # ---------------- Local vocab rebuild (also bigrams) ----------------
     def _index_word(self, word: str):
+        """Index one word by normalized prefix for fast lookup."""
         if not word:
             # Exit the function when no further work is needed.
             return
@@ -1281,6 +1373,7 @@ class AINotepad(tk.Tk):
             bucket.add(w)
 
     def _rebuild_vocab_index(self):
+        """Rebuild prefix buckets from current in-memory vocabulary."""
         # Update instance state field `vocab_norm` so later UI logic can reuse it.
         self.vocab_norm = {}
         # Update instance state field `vocab_by_prefix` so later UI logic can reuse it.
@@ -1289,6 +1382,7 @@ class AINotepad(tk.Tk):
             self._index_word(w)
 
     def schedule_vocab_rebuild(self):
+        """Debounce vocabulary rebuild triggered by typing activity."""
         if self._after_vocab:
             # Schedule this callback on Tk's event loop for deferred execution.
             self.after_cancel(self._after_vocab)
@@ -1296,6 +1390,7 @@ class AINotepad(tk.Tk):
         self._after_vocab = self.after(VOCAB_REBUILD_MS, self.rebuild_vocab)
 
     def rebuild_vocab(self):
+        """Learn recent words and bigrams from editor tail window."""
         # Update instance state field `_after_vocab` so later UI logic can reuse it.
         self._after_vocab = None
         text = self.text.get("1.0", "end-1c")
@@ -1311,6 +1406,7 @@ class AINotepad(tk.Tk):
 
         wc = Counter(norm)
 
+        # Track local transitions to improve next-word ranking.
         bg = Counter()
         for a, b in zip(norm[:-1], norm[1:]):
             bg[(a, b)] += 1
@@ -1323,6 +1419,7 @@ class AINotepad(tk.Tk):
         # DB stays read-only after initial seed
 
     def local_candidates_scored(self, frag: str, prev: str, lang: str):
+        """Rank local candidates using prefix, frequency, bigram, and fuzzy score."""
         frag = (frag or "").strip()
         if not frag:
             return []
@@ -1351,6 +1448,7 @@ class AINotepad(tk.Tk):
 
         use_fuzzy = ENABLE_FUZZY and len(frag_n) >= 3 and (not scored or not FUZZY_ONLY_IF_NO_PREFIX)
         if use_fuzzy:
+            # Restrict fuzzy candidates to same first letter to reduce noisy hits.
             first = frag_n[0]
             for w in candidates:
                 wn = self.vocab_norm.get(w)
@@ -1376,6 +1474,7 @@ class AINotepad(tk.Tk):
 
     # ---------------- Typing loop ----------------
     def on_key_release(self, event=None):
+        """Main typing loop: refresh state, local candidates, and AI timers."""
         try:
             if event is not None and event.keysym in (
                 "Shift_L","Shift_R","Control_L","Control_R","Alt_L","Alt_R","Caps_Lock"
@@ -1438,6 +1537,7 @@ class AINotepad(tk.Tk):
 
     # ---------------- AI: WORD suggestions (optional) ----------------
     def request_word_suggestions(self, force: bool = False):
+        """Ask LLM for word completions and merge with local ranking."""
         # Update instance state field `_after_word` so later UI logic can reuse it.
         self._after_word = None
         if not USE_LLM_WORD_SUGGESTIONS and not force:
@@ -1467,6 +1567,7 @@ class AINotepad(tk.Tk):
         req_id = self._word_req
 
         def worker():
+            # Worker thread does I/O; UI updates are marshalled via `after`.
             suggestions = []
             try:
                 suggestions = self.ask_word_suggestions_plain(ctx, prev, frag, lang)
@@ -1474,6 +1575,7 @@ class AINotepad(tk.Tk):
                 suggestions = []
 
             def ui():
+                # Ignore stale results if user has typed since request started.
                 if req_id != self._word_req or req_version != self.doc_version:
                     # Exit the function when no further work is needed.
                     return
@@ -1493,6 +1595,7 @@ class AINotepad(tk.Tk):
         threading.Thread(target=worker, daemon=True).start()
 
     def ask_word_suggestions_plain(self, context: str, prev_word: str, fragment: str, lang: str):
+        """Return sanitized word-only suggestions from the model output."""
         if lang == "fr":
             system = "Rôle: éditeur. Donne 1 à 3 mots (un par ligne). Pas d'explications. Un seul mot sans espaces."
         # Fallback branch when previous conditions did not match.
@@ -1513,6 +1616,7 @@ class AINotepad(tk.Tk):
 
         out = []
         for line in txt.splitlines():
+            # Accept only a single lexical token per model line.
             s = re.sub(r"^\s*[\-\*\d\.\)\:]+\s*", "", (line or "")).strip()
             if not s:
                 continue
@@ -1525,6 +1629,7 @@ class AINotepad(tk.Tk):
 
     # ---------------- AI: NEXT ghost (Copilot-like) ----------------
     def request_next_ghost(self):
+        """Request short continuation ghost text when cursor context is valid."""
         # Update instance state field `_after_next` so later UI logic can reuse it.
         self._after_next = None
         if not USE_LLM_NEXT_GHOST:
@@ -1558,6 +1663,7 @@ class AINotepad(tk.Tk):
         req_id = self._ghost_req
 
         def worker():
+            # Compute suggestion off the UI thread.
             suggestion = ""
             try:
                 raw = self.ask_next_ghost_plain(ctx, lang)
@@ -1566,6 +1672,7 @@ class AINotepad(tk.Tk):
                 suggestion = ""
 
             def ui():
+                # Discard stale continuation responses.
                 if req_id != self._ghost_req or req_version != self.doc_version:
                     # Exit the function when no further work is needed.
                     return
@@ -1583,6 +1690,7 @@ class AINotepad(tk.Tk):
         threading.Thread(target=worker, daemon=True).start()
 
     def ask_next_ghost_plain(self, context: str, lang: str) -> str:
+        """Generate a compact 1-3 word continuation string."""
         context = (context or "")[-NEXT_GHOST_CONTEXT_CHARS:]
         if not context.strip():
             return ""
@@ -1614,6 +1722,7 @@ class AINotepad(tk.Tk):
 
     # ---------------- Fix region ----------------
     def get_fix_region(self):
+        """Return the current paragraph-like block bounded by blank lines."""
         # Capture text positions used to target edits and highlight ranges accurately.
         insert = self.text.index("insert")
         # Capture text positions used to target edits and highlight ranges accurately.
@@ -1652,6 +1761,7 @@ class AINotepad(tk.Tk):
 
     # ---------------- Fix popup positioning ----------------
     def _fix_popup_size(self):
+        """Compute popup size from screen dimensions with lower/upper bounds."""
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
         pad = 12
@@ -1662,6 +1772,7 @@ class AINotepad(tk.Tk):
         return w, h
 
     def _clamp_to_screen(self, x, y, w, h, pad=10):
+        """Clamp popup coordinates so it always stays inside screen area."""
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
         x = max(pad, min(x, sw - w - pad))
@@ -1669,6 +1780,7 @@ class AINotepad(tk.Tk):
         return x, y
 
     def _reposition_fix_popup(self):
+        """Position fix popup near caret, with automatic above/below fallback."""
         if not self.fix_popup.winfo_viewable():
             # Exit the function when no further work is needed.
             return
@@ -1692,9 +1804,11 @@ class AINotepad(tk.Tk):
         self.fix_popup.geometry(f"{pw}x{ph}+{x_root}+{y_root}")
 
     def hide_fix_popup(self):
+        """Hide correction preview popup."""
         self.fix_popup.withdraw()
 
     def show_fix_popup(self, corrected: str):
+        """Populate and display correction preview content."""
         corrected = clean_llm_text(corrected)
         if not corrected or looks_like_chatbot_output(corrected):
             self.hide_fix_popup()
@@ -1715,6 +1829,7 @@ class AINotepad(tk.Tk):
 
     # ---------------- Underline diffs ----------------
     def underline_diffs(self, start_index: str, original: str, corrected: str):
+        """Underline changed spans from the original text block."""
         try:
             self.text.tag_remove("ai_bad", start_index, f"{start_index}+{len(original)}c")
         except Exception:
@@ -1743,6 +1858,7 @@ class AINotepad(tk.Tk):
 
     # ---------------- Apply fix ----------------
     def apply_fix(self):
+        """Apply accepted fix only if source snapshot still matches editor text."""
         if not (self.fix_corrected and self.fix_start and self.fix_end):
             # Exit the function when no further work is needed.
             return
@@ -1772,6 +1888,7 @@ class AINotepad(tk.Tk):
 
     # ---------------- Corrector quality guards ----------------
     def _is_bad_fix(self, original: str, corrected: str) -> bool:
+        """Reject suspicious outputs: empty, chatty, too short, or structure loss."""
         o = (original or "").strip()
         c = (corrected or "").strip()
         if not c:
@@ -1790,6 +1907,7 @@ class AINotepad(tk.Tk):
         return False
 
     def ask_block_fix_plain(self, block: str, lang: str, strong: bool = False) -> str:
+        """Request block correction with strict 'no rewrite' constraints."""
         if lang == "fr":
             system = (
                 "Rôle: correcteur (pas un chatbot). "
@@ -1825,6 +1943,7 @@ class AINotepad(tk.Tk):
         return out if out else block
 
     def _linewise_fix(self, block: str, lang: str) -> str:
+        """Fallback correction that preserves structure line by line."""
         # Capture text positions used to target edits and highlight ranges accurately.
         lines = block.splitlines(True)
         fixed = []
@@ -1841,6 +1960,7 @@ class AINotepad(tk.Tk):
 
     # ---------------- AI: BLOCK fix (auto preview) ----------------
     def request_block_fix(self):
+        """Build correction preview for current block with staged fallbacks."""
         # Update instance state field `_after_fix` so later UI logic can reuse it.
         self._after_fix = None
         if LLM_SERIAL and self._llm_lock.locked():
@@ -1876,6 +1996,7 @@ class AINotepad(tk.Tk):
         original_snapshot = block
 
         def worker():
+            # Stage 1: normal correction prompt.
             corrected = original_snapshot
             try:
                 corrected = self.ask_block_fix_plain(original_snapshot, lang, strong=False)
@@ -1884,6 +2005,7 @@ class AINotepad(tk.Tk):
                 corrected = original_snapshot
 
             if self._is_bad_fix(original_snapshot, corrected):
+                # Stage 2: stricter prompt requiring full return.
                 try:
                     corrected2 = self.ask_block_fix_plain(original_snapshot, lang, strong=True)
                     corrected2 = post_fix_spacing(corrected2)
@@ -1893,6 +2015,7 @@ class AINotepad(tk.Tk):
                     pass
 
             if self._is_bad_fix(original_snapshot, corrected):
+                # Stage 3: line-by-line correction as final fallback.
                 try:
                     corrected3 = self._linewise_fix(original_snapshot, lang)
                     corrected3 = post_fix_spacing(corrected3)
@@ -1904,6 +2027,7 @@ class AINotepad(tk.Tk):
             corrected = clean_llm_text(corrected)
 
             def ui():
+                # Ignore stale response if document changed meanwhile.
                 if req_id != self._fix_req or req_version != self.doc_version:
                     # Exit the function when no further work is needed.
                     return
@@ -1936,6 +2060,7 @@ class AINotepad(tk.Tk):
 
     # ---------------- Correct ALL (apply automatically) ----------------
     def correct_document(self):
+        """Run whole-document correction in chunks and show one preview result."""
         self.update_lang()
         if not self._ensure_model_available():
             # Exit the function when no further work is needed.
@@ -1986,6 +2111,7 @@ class AINotepad(tk.Tk):
                 # Schedule this callback on Tk's event loop for deferred execution.
                 self.after(0, lambda i=i: self.status.config(text=f"Correcting… {i}/{total}"))
 
+            # Reassemble corrected chunks in original order.
             corrected_all = "".join(out_chunks)
 
             def ui():

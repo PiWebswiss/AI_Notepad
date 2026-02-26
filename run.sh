@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Linux launcher for AI Notepad.
+# It prepares X11 auth for containerized UI use-cases, ensures Ollama/model
+# availability, then starts the compose stack.
+
 # Per-run Xauthority file for container access to host X display.
 DISPLAY_VALUE="${DISPLAY:-:0}"
 XAUTH="$(mktemp /tmp/.docker.xauth.XXXXXX)"
@@ -20,6 +24,7 @@ xauth nlist "$DISPLAY_VALUE" \
 
 COMPOSE=("docker" "compose" "-f" "docker-compose.yml" "-f" "docker-compose.x11.yml")
 
+# Start from a clean compose state to avoid stale network/container state.
 "${COMPOSE[@]}" down
 
 # Resolve model from env/.env with default fallback.
@@ -30,6 +35,7 @@ fi
 MODEL="${MODEL:-gemma3:1b}"
 
 # Pull model once if missing (unless NO_AUTO_PULL=1).
+# This avoids paying pull time on every run.
 if [ "${NO_AUTO_PULL:-0}" != "1" ]; then
   "${COMPOSE[@]}" up -d ollama
 

@@ -1,3 +1,7 @@
+# Compose topology:
+# - ollama: LLM inference API service
+# - ollama_init: one-shot model pull helper
+# - app: optional utility container (the GUI app runs natively on host)
 services:
   ollama: # local LLM server
     image: ollama/ollama:latest

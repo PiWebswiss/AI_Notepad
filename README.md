@@ -17,6 +17,19 @@ chmod +x ./run.sh
 ./run.sh
 ```
 
+## Restart after Ctrl + C
+If you stop AI Notepad with `Ctrl + C`, run the launcher command again.
+
+### Windows
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run.ps1
+```
+
+### Linux
+```bash
+./run.sh
+```
+
 <!-- ## App Documentation
 - French: [app_readme_fr.md](app_readme_fr.md)
 - English: [app_readme_en.md](app_readme_en.md) -->

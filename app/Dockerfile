@@ -1,6 +1,9 @@
 # lightweight Python base image
 FROM python:3.11-slim  
 
+# This image is mainly used as a utility/debug container in this project.
+# The primary GUI app runs on the host OS (not inside this container).
+
 # Ensure logs appear immediately (useful for container debugging).
 ENV PYTHONUNBUFFERED=1
 

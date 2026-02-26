@@ -4,4 +4,6 @@ dossier.md
 dossier.pdf
 README.pdf
 data
-app\__pycache__
+app/__pycache__
+README_PSEUDOCODE.md
+python.ipynb

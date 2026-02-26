@@ -1,6 +1,9 @@
 #!/usr/bin/env pwsh
 $ErrorActionPreference = "Stop"
 
+# Cleanup script for Windows host.
+# This script removes running containers/volumes and optionally local artifacts.
+
 # Stop containers and remove compose volumes (including Ollama model data volume).
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
@@ -13,6 +16,7 @@ $ollamaImage = "ollama/ollama:latest"
 
 function Confirm-Remove($path, $description) {
   if (-not (Test-Path $path)) { return }
+  # Ask before deleting slower-to-rebuild assets.
   $answer = Read-Host "Remove $description at '$path'? (y/N)"
   if ($answer -match '^[Yy]$') {
     Write-Host "Removing $description..."

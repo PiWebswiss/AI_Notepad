@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Cleanup script for Linux host.
+# It removes compose resources and can optionally remove venv/image artifacts.
+
 # Stop containers and remove compose volumes (including Ollama model data volume).
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
@@ -17,6 +20,7 @@ confirm_remove() {
   if [ ! -e "$path" ]; then
     return
   fi
+  # Ask before deleting slower-to-rebuild assets.
   read -r -p "Remove $description at '$path'? (y/N) " answer
   if [[ "$answer" =~ ^[Yy]$ ]]; then
     echo "Removing $description..."
