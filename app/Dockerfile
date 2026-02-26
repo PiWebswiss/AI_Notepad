@@ -1,4 +1,5 @@
-FROM python:3.11-slim  # lightweight Python base image
+# lightweight Python base image
+FROM python:3.11-slim  
 
 # Ensure logs appear immediately (useful for container debugging).
 ENV PYTHONUNBUFFERED=1

@@ -1,4 +1,2 @@
-# Ollama Python SDK for local model chat/completion calls.
 ollama
-# Frequency corpus used to seed SQLite vocabulary (EN/FR).
 wordfreq
