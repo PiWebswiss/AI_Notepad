@@ -1,103 +1,53 @@
-# Start the service definitions managed by Docker Compose.
 services:
-  # Define compose key `ollama` for this section.
-  ollama:                                  # runs the Ollama model server
-    # Choose the container image tag for this service.
+  ollama: # local LLM server
     image: ollama/ollama:latest
-    # Give the container a stable, human-readable name.
     container_name: AI_Notepad-ollama
-    # Declare host-to-container port mappings.
     ports:
-      # Add `11434:11434 # expose Ollama API to host` as an entry in this list-based compose section.
-      - "11434:11434"                      # expose Ollama API to host
-    # Declare named volumes used for persistent data.
+      - "11434:11434" # expose Ollama API to host
     volumes:
-      # Add `ollama:/root/.ollama # persist downloaded models` as an entry in this list-based compose section.
-      - ollama:/root/.ollama               # persist downloaded models
-    # Define the restart policy for service resilience.
+      - ollama:/root/.ollama # persist downloaded models
     restart: unless-stopped
 
-  # Define compose key `ollama_init` for this section.
-  ollama_init:                             # one-shot job to pull the model, then exit
-    # Choose the container image tag for this service.
+  ollama_init: # one-shot model pull job
     image: ollama/ollama:latest
-    # Give the container a stable, human-readable name.
     container_name: AI_Notepad-ollama-init
-    # Gate this service behind an opt-in compose profile.
-    profiles: ["init"]                     # run with: docker compose --profile init up
-    # Ensure startup ordering between related services.
+    profiles: ["init"] # run with: docker compose --profile init up
     depends_on:
-      # Add `ollama` as an entry in this list-based compose section.
       - ollama
-    # Declare runtime environment variables for the container.
     environment:
-      # Add `OLLAMA HOST=http://ollama:11434 # target the running Ollama service` as an entry in this list-based compose section.
-      - OLLAMA_HOST=http://ollama:11434    # target the running Ollama service
-      # Add `OLLAMA MODEL=${OLLAMA MODEL} # model name to download` as an entry in this list-based compose section.
-      - OLLAMA_MODEL=${OLLAMA_MODEL}       # model name to download
-    # Define the startup executable sequence for this service.
+      - OLLAMA_HOST=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL}
     entrypoint: ["/bin/sh", "-lc", "ollama pull $OLLAMA_MODEL"]
-    # Define the restart policy for service resilience.
     restart: "no"
 
-  # Define compose key `app` for this section.
-  app:                                     # main application container
-    # Point to the build context used to create the image.
-    build: ./app                           # build from local Dockerfile
-    # Give the container a stable, human-readable name.
+  app: # optional app container (GUI runs natively on host in current flow)
+    build: ./app
     container_name: AI_Notepad
-    # Ensure startup ordering between related services.
     depends_on:
-      # Add `ollama` as an entry in this list-based compose section.
       - ollama
-    # Declare runtime environment variables for the container.
     environment:
-      # Provide env var `DB_FILE` so the container runtime gets this configuration value.
-      DB_FILE: /data/ainotepad_vocab.db           # SQLite path inside container
-      # Provide env var `OLLAMA_HOST` so the container runtime gets this configuration value.
-      OLLAMA_HOST: http://ollama:11434            # Ollama endpoint
-      # Provide env var `OLLAMA_MODEL` so the container runtime gets this configuration value.
-      OLLAMA_MODEL: ${OLLAMA_MODEL}               # model to use
-      # Provide env var `OLLAMA_TIMEOUT` so the container runtime gets this configuration value.
-      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-180}      # request timeout (seconds)
-      # Provide env var `MODEL_CHECK_INTERVAL` so the container runtime gets this configuration value.
-      MODEL_CHECK_INTERVAL: ${MODEL_CHECK_INTERVAL:-30}  # poll interval for model
-      # Provide env var `SHOW_MODEL_ERRORS` so the container runtime gets this configuration value.
-      SHOW_MODEL_ERRORS: ${SHOW_MODEL_ERRORS:-1}         # log model errors (1=yes)
-      # Provide env var `LLM_SERIAL` so the container runtime gets this configuration value.
-      LLM_SERIAL: ${LLM_SERIAL:-1}                      # limit concurrent prompts
-      # Provide env var `OLLAMA_NUM_PREDICT_MIN` so the container runtime gets this configuration value.
-      OLLAMA_NUM_PREDICT_MIN: ${OLLAMA_NUM_PREDICT_MIN:-200}  # min tokens
-      # Provide env var `OLLAMA_NUM_PREDICT_MAX` so the container runtime gets this configuration value.
-      OLLAMA_NUM_PREDICT_MAX: ${OLLAMA_NUM_PREDICT_MAX:-900}  # max tokens
-      # Provide env var `WORDLIST_TOP_N` so the container runtime gets this configuration value.
-      WORDLIST_TOP_N: ${WORDLIST_TOP_N:-120000}               # vocab size for seeding
-      # Provide env var `FORCE_RESEED` so the container runtime gets this configuration value.
-      FORCE_RESEED: ${FORCE_RESEED:-0}                        # force rebuild of vocab
-      # Provide env var `MIN_WORDS_THRESHOLD` so the container runtime gets this configuration value.
-      MIN_WORDS_THRESHOLD: ${MIN_WORDS_THRESHOLD:-0}          # reseed if below this
-      # Provide env var `ENABLE_FUZZY` so the container runtime gets this configuration value.
-      ENABLE_FUZZY: ${ENABLE_FUZZY:-0}                        # toggle fuzzy search
-      # Provide env var `DB_TOP_WORDS` so the container runtime gets this configuration value.
-      DB_TOP_WORDS: ${DB_TOP_WORDS:-150000}                   # export limit for words
-      # Provide env var `DB_TOP_BIGRAMS` so the container runtime gets this configuration value.
-      DB_TOP_BIGRAMS: ${DB_TOP_BIGRAMS:-80000}                # export limit for bigrams
-      # Provide env var `USE_LLM_NEXT_GHOST` so the container runtime gets this configuration value.
-      USE_LLM_NEXT_GHOST: ${USE_LLM_NEXT_GHOST:-0}            # feature flag
-      # Provide env var `USE_SQLITE_VOCAB` so the container runtime gets this configuration value.
-      USE_SQLITE_VOCAB: ${USE_SQLITE_VOCAB:-1}                # use SQLite-backed vocab
-      # Provide env var `ALLOW_UNKNOWN_WORDS` so the container runtime gets this configuration value.
-      ALLOW_UNKNOWN_WORDS: ${ALLOW_UNKNOWN_WORDS:-0}          # allow out-of-vocab words
-    # Declare named volumes used for persistent data.
+      DB_FILE: /data/ainotepad_vocab.db # SQLite path inside container
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL}
+      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-180}
+      MODEL_CHECK_INTERVAL: ${MODEL_CHECK_INTERVAL:-30}
+      SHOW_MODEL_ERRORS: ${SHOW_MODEL_ERRORS:-1}
+      LLM_SERIAL: ${LLM_SERIAL:-1}
+      OLLAMA_NUM_PREDICT_MIN: ${OLLAMA_NUM_PREDICT_MIN:-200}
+      OLLAMA_NUM_PREDICT_MAX: ${OLLAMA_NUM_PREDICT_MAX:-900}
+      WORDLIST_TOP_N: ${WORDLIST_TOP_N:-120000}
+      FORCE_RESEED: ${FORCE_RESEED:-0}
+      MIN_WORDS_THRESHOLD: ${MIN_WORDS_THRESHOLD:-0}
+      ENABLE_FUZZY: ${ENABLE_FUZZY:-0}
+      DB_TOP_WORDS: ${DB_TOP_WORDS:-150000}
+      DB_TOP_BIGRAMS: ${DB_TOP_BIGRAMS:-80000}
+      USE_LLM_NEXT_GHOST: ${USE_LLM_NEXT_GHOST:-0}
+      USE_SQLITE_VOCAB: ${USE_SQLITE_VOCAB:-1}
+      ALLOW_UNKNOWN_WORDS: ${ALLOW_UNKNOWN_WORDS:-0}
     volumes:
-      # Add `./data:/data # persist DB on host` as an entry in this list-based compose section.
-      - ./data:/data                                   # persist DB on host
-    # Override the default command run at container startup.
-    command: ["sleep", "infinity"]                     # keep container running for debugging
-    # Define the restart policy for service resilience.
-    restart: "no"                                      # do not auto-restart
+      - ./data:/data # persist DB on host
+    command: ["sleep", "infinity"] # keep container available for debug tasks
+    restart: "no"
 
-# Declare named volumes used for persistent data.
 volumes:
-  # Define compose key `ollama` for this section.
-  ollama:                                          # named volume for Ollama data
+  ollama: # named volume for Ollama model data

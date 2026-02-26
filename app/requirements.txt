@@ -1,5 +1,4 @@
-# Runtime dependencies for the app
-# Declare Python dependency `ollama` so it gets installed into the virtual environment.
+# Ollama Python SDK for local model chat/completion calls.
 ollama
-# Declare Python dependency `wordfreq` so it gets installed into the virtual environment.
+# Frequency corpus used to seed SQLite vocabulary (EN/FR).
 wordfreq
