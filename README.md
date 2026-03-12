@@ -30,7 +30,7 @@ chmod +x ./run.sh
 ### Windows
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\cleanup_native.ps1
+powershell -ExecutionPolicy Bypass -File .\cleanup.ps1
 ```
 
 ### Linux

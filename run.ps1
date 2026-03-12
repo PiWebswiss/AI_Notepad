@@ -42,7 +42,9 @@ if ($names -notcontains $model) {
   docker compose exec -T ollama ollama pull $model
 }
 
-# Create local venv if needed.
+# The code below runs only if the the .venv or the database are missing.
+
+# Create local venv and install dependencies. 
 # We keep app dependencies isolated from the system Python.
 $venvPath = Join-Path $root ".venv"
 $pythonDir = Join-Path $venvPath "Scripts"
@@ -60,7 +62,7 @@ Write-Host "Installing Python dependencies..."
 & $python -m pip install --upgrade pip
 & $python -m pip install -r (Join-Path $appDir "requirements.txt")
 
-# Configure app env and seed DB if needed.
+# Configure app env and seed DB 
 # DB_FILE points to the project-local persistent data folder.
 $env:DB_FILE = Join-Path (Join-Path $root "data") "ainotepad_vocab.db"
 $env:OLLAMA_HOST = "http://localhost:11434"
