@@ -6,6 +6,8 @@
 #   2) optional Copilot-like short continuation (grey ghost text)
 
 # --- DPI AWARE (Windows) ---
+# Request per-monitor DPI awareness so the UI is sharp on high-resolution screens.
+# Level 2 = per-monitor V2 (Windows 10+); fall back to the older V1 API if unavailable.
 import sys
 if sys.platform.startswith("win"):
     try:
@@ -42,7 +44,6 @@ def env_flag(name: str, default: bool = False) -> bool:
     if val is None:
         return default
     return val.strip().lower() in ("1", "true", "yes", "on")
-
 
 # ================= CONFIG =================
 # Choose the default model used for text generation and corrections.
@@ -112,6 +113,7 @@ MIN_WORD_FRAGMENT = 2
 # Maximum items shown in the suggestions popup.
 POPUP_MAX_ITEMS = 3
 # Prefix length used for fast local candidate lookup.
+# Two characters give a good balance: small enough bucket count, large enough to prune candidates fast.
 PREFIX_INDEX_LEN = 2
 # Run fuzzy matching only when no strong prefix match is found.
 FUZZY_ONLY_IF_NO_PREFIX = True
@@ -135,13 +137,13 @@ PUNCT_CHARS = set(",.;:!?)]}\"'’”")
 NO_SPACE_BEFORE_PUNCT = True
 
 # Fuzzy matching thresholds.
-FUZZY_MIN_RATIO = 0.72
+FUZZY_MIN_RATIO = 0.72  # Minimum SequenceMatcher similarity ratio to accept a fuzzy candidate.
 FUZZY_MAX_LEN_DIFF = 3
 
 # SQLite
 # SQLite database file path.
 DB_FILE = os.environ.get("DB_FILE", "/data/ainotepad_vocab.db")
-# Flush delay in milliseconds for queued writes.
+# Flush delay in milliseconds for queued writes (batches updates to reduce I/O).
 DB_FLUSH_MS = 2500
 # Maximum words loaded from SQLite into memory.
 DB_TOP_WORDS = int(os.environ.get("DB_TOP_WORDS", "150000"))
@@ -150,7 +152,6 @@ DB_TOP_BIGRAMS = int(os.environ.get("DB_TOP_BIGRAMS", "80000"))
 
 # Show model errors in the status bar when enabled.
 SHOW_MODEL_ERRORS_IN_STATUS = os.environ.get("SHOW_MODEL_ERRORS", "1") == "1"
-
 
 # ================= THEME (VS CODE DARK-ish) =================
 BG = "#0b0f14"
@@ -170,17 +171,16 @@ POPUP_SHADOW = "#05080e"
 FONT_UI = ("Segoe UI Semibold", 11)
 FONT_EDIT = ("Cascadia Code", 14)
 
-
 # ================= UTILITIES =================
 WORD_CHAR_RE = re.compile(r"[A-Za-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u00ff'’\-]")
 
 def strip_accents(s: str) -> str:
     """Return accent-stripped representation used for fuzzy matching/indexing."""
+    # NFD decomposition separates base letters from their diacritic marks.
+    # Filtering out "Mn" (non-spacing marks) then removes the accents.
     return "".join(ch for ch in unicodedata.normalize("NFD", s) if unicodedata.category(ch) != "Mn")
 
-
-LANG_SETS_CACHE = None
-
+LANG_SETS_CACHE = None  # Module-level cache; populated once on first call to load_lang_sets().
 
 def load_lang_sets():
     """Load language word sets from normalized DB table words(word, lang)."""
@@ -208,7 +208,6 @@ def load_lang_sets():
     LANG_SETS_CACHE = lang_sets
     return LANG_SETS_CACHE
 
-
 def detect_lang(text: str) -> str:
     """Detect language (fr/en) using DB-backed language entries."""
     tokens = re.findall(r"[A-Za-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u00ff']+", (text or "").lower())
@@ -218,11 +217,11 @@ def detect_lang(text: str) -> str:
 
     en_hits = sum(1 for w in tokens if w in lang_sets["en"])
     fr_hits = sum(1 for w in tokens if w in lang_sets["fr"])
+    # Tie-break: if counts are equal, check for French-only accented characters.
     if en_hits == fr_hits:
         if re.search(r"[\u00e0\u00e2\u00e4\u00e6\u00e7\u00e9\u00e8\u00ea\u00eb\u00ee\u00ef\u00f4\u0153\u00f9\u00fb\u00fc\u00ff]", " ".join(tokens)):
             fr_hits += 1
     return "fr" if fr_hits > en_hits else "en"
-
 
 def split_into_chunks(text: str, max_chars: int):
     """Split text into chunks that do not exceed max_chars, keeping blank-line separators."""
@@ -230,6 +229,8 @@ def split_into_chunks(text: str, max_chars: int):
     if len(text) <= max_chars:
         return [text]
 
+    # Split on double newlines (paragraph breaks) and keep the separators
+    # so the original paragraph structure can be reconstructed after processing.
     parts = re.split(r"(\\n\\s*\\n)", text)  # keep blank-line separator
     chunks, cur = [], ""
 
@@ -237,7 +238,6 @@ def split_into_chunks(text: str, max_chars: int):
         if len(cur) + len(p) <= max_chars:
 
             cur += p
-        # Fallback branch when previous conditions did not match.
         else:
             if cur:
                 chunks.append(cur)
@@ -251,18 +251,17 @@ def split_into_chunks(text: str, max_chars: int):
     for ch in chunks:
         if len(ch) <= max_chars:
             out.append(ch)
-        # Fallback branch when previous conditions did not match.
         else:
             for i in range(0, len(ch), max_chars):
                 out.append(ch[i:i + max_chars])
 
     return out
 
-
+# Detects chat-style headers in model output (e.g. "assistant: ...") which indicate the model
+# replied as a chatbot rather than returning corrected text directly.
 CHATBOT_ROLE_RE = re.compile(r"(?m)^(assistant|user|system)\s*:")
 ACCENT_RE = re.compile(r"[àâäæçéèêëîïôœùûüÿ]", re.IGNORECASE)
-_OLLAMA_CLIENT = None
-
+_OLLAMA_CLIENT = None  # Singleton Ollama client; created lazily on first use.
 
 def get_ollama_client():
     """Create and cache a single Ollama client instance."""
@@ -273,7 +272,6 @@ def get_ollama_client():
         except TypeError:
             _OLLAMA_CLIENT = ollama.Client(host=OLLAMA_HOST)
     return _OLLAMA_CLIENT
-
 
 def uniq_keep_order(items):
     """Remove duplicates while preserving first-seen order."""
@@ -289,7 +287,6 @@ def uniq_keep_order(items):
         out.append(item)
     return out
 
-
 def clean_llm_text(text: str) -> str:
     """Normalize model output and strip common wrapper artifacts."""
     if not text:
@@ -298,7 +295,6 @@ def clean_llm_text(text: str) -> str:
     if not t:
         return ""
 
-    # Capture text positions used to target edits and highlight ranges accurately.
     lines = t.splitlines()
     if len(lines) >= 2 and lines[0].startswith("```") and lines[-1].startswith("```"):
         t = "\n".join(lines[1:-1]).strip()
@@ -309,7 +305,6 @@ def clean_llm_text(text: str) -> str:
             t = t[1:-1].strip()
 
     return t
-
 
 def looks_like_chatbot_output(text: str) -> bool:
     """Detect generic assistant/meta replies that are invalid as direct edits."""
@@ -327,7 +322,6 @@ def looks_like_chatbot_output(text: str) -> bool:
         "i am unable",
         "i'm sorry",
         "sorry",
-    # Open a new indented block that groups the next logical steps.
     )):
         return True
     if "here's the corrected" in low or "here is the corrected" in low:
@@ -338,7 +332,6 @@ def looks_like_chatbot_output(text: str) -> bool:
         return True
     return False
 
-
 def post_fix_spacing(text: str) -> str:
     """Apply lightweight punctuation spacing cleanup after correction."""
     if not text:
@@ -348,7 +341,6 @@ def post_fix_spacing(text: str) -> str:
     t = re.sub(r"[ \t]+([\)\]\}])", r"\1", t)
     t = re.sub(r"[ \t]{2,}", " ", t)
     return t
-
 
 def is_lang_word(word: str, lang: str) -> bool:
     """Filter candidate words by detected language and configuration flags."""
@@ -384,95 +376,65 @@ class AINotepad(tk.Tk):
         self.title("AI Notepad")
         self.geometry("1500x1000")
         self.minsize(900, 580)
-        # Update instance state field `configure(bg` so later UI logic can reuse it.
         self.configure(bg=BG)
 
-        # Update instance state field `filepath` so later UI logic can reuse it.
         self.filepath = None
 
         # Debounce handles
-        # Update instance state field `_after_word` so later UI logic can reuse it.
         self._after_word = None
-        # Update instance state field `_after_fix` so later UI logic can reuse it.
         self._after_fix = None
-        # Update instance state field `_after_vocab` so later UI logic can reuse it.
         self._after_vocab = None
-        # Update instance state field `_after_next` so later UI logic can reuse it.
         self._after_next = None
-        # Update instance state field `_after_db_flush` so later UI logic can reuse it.
         self._after_db_flush = None
-        # Update instance state field `_after_model_error` so later UI logic can reuse it.
         self._after_model_error = None
-        # Update instance state field `_llm_lock` so later UI logic can reuse it.
         self._llm_lock = threading.Lock()
 
         # Request ids + doc version to drop stale results
-        # Update instance state field `_word_req` so later UI logic can reuse it.
         self._word_req = 0
-        # Update instance state field `_fix_req` so later UI logic can reuse it.
         self._fix_req = 0
-        # Update instance state field `_ghost_req` so later UI logic can reuse it.
         self._ghost_req = 0
-        # Update instance state field `doc_version` so later UI logic can reuse it.
         self.doc_version = 0
-        # Update instance state field `_model_available` so later UI logic can reuse it.
         self._model_available = None
-        # Update instance state field `_model_checked_at` so later UI logic can reuse it.
         self._model_checked_at = 0.0
 
         # Language
-        # Update instance state field `lang` so later UI logic can reuse it.
         self.lang = "en"
 
         # Vocab + bigrams
-        # Update instance state field `vocab` so later UI logic can reuse it.
         self.vocab = Counter()
-        # Update instance state field `bigram` so later UI logic can reuse it.
         self.bigram = Counter()
-        # Update instance state field `_last_vocab_tail` so later UI logic can reuse it.
         self._last_vocab_tail = ""
-        # Update instance state field `vocab_norm` so later UI logic can reuse it.
         self.vocab_norm = {}
-        # Update instance state field `vocab_by_prefix` so later UI logic can reuse it.
         self.vocab_by_prefix = {}
 
         # SQLite persistence
-        # Update instance state field `db` so later UI logic can reuse it.
         self.db = None
-        # Update instance state field `db_pending_words` so later UI logic can reuse it.
         self.db_pending_words = Counter()
-        # Update instance state field `db_pending_bigrams` so later UI logic can reuse it.
         self.db_pending_bigrams = Counter()
         if USE_SQLITE_VOCAB:
             self._db_open_and_load()
         self._rebuild_vocab_index()
 
         # Word suggestion state
-        # Update instance state field `word_span` so later UI logic can reuse it.
         self.word_span = None      # (start_index, end_index, full_word)
-        # Update instance state field `word_frag` so later UI logic can reuse it.
         self.word_frag = ""
-        # Update instance state field `word_items` so later UI logic can reuse it.
         self.word_items = []
-        # Update instance state field `word_idx` so later UI logic can reuse it.
         self.word_idx = 0
-        # Update instance state field `word_cache` so later UI logic can reuse it.
+        # Cache avoids repeat LLM calls for the same (language, fragment, previous word) key.
         self.word_cache = {}  # (lang, frag.lower(), prev.lower()) -> suggestions
 
         # Fix state
-        # Update instance state field `fix_start` so later UI logic can reuse it.
         self.fix_start = None
-        # Update instance state field `fix_end` so later UI logic can reuse it.
         self.fix_end = None
-        # Update instance state field `fix_original` so later UI logic can reuse it.
         self.fix_original = ""
-        # Update instance state field `fix_corrected` so later UI logic can reuse it.
         self.fix_corrected = ""
-        # Update instance state field `fix_version` so later UI logic can reuse it.
         self.fix_version = -1
 
         # Ghost (single label)
-        # Update instance state field `ghost_mode` so later UI logic can reuse it.
+        # ghost_mode tracks what kind of inline suggestion is displayed:
+        #   "none"  – nothing shown
+        #   "word"  – suffix of the top word suggestion
+        #   "next"  – Copilot-style sentence continuation
         self.ghost_mode = "none"  # none | next | word
 
         self._build_ui()
@@ -483,7 +445,6 @@ class AINotepad(tk.Tk):
     def _db_open_and_load(self):
         """Open SQLite DB, ensure schema/indexes, then load vocab and bigrams."""
         try:
-            # Update instance state field `db` so later UI logic can reuse it.
             self.db = sqlite3.connect(DB_FILE)
             cur = self.db.cursor()
             cur.execute("PRAGMA foreign_keys=ON;")
@@ -497,6 +458,8 @@ class AINotepad(tk.Tk):
                     lang TEXT NOT NULL DEFAULT 'en' CHECK(lang IN ('en','fr'))
                 );
             """)
+            # Composite primary key: a bigram is uniquely identified by its word pair.
+            # There is no single surrogate ID; the combination (prev_id, next_id) IS the identity.
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS bigrams(
                     prev_id INTEGER NOT NULL,
@@ -520,7 +483,7 @@ class AINotepad(tk.Tk):
             cur.execute("SELECT word, freq FROM words ORDER BY freq DESC LIMIT ?;", (DB_TOP_WORDS,))
             self.vocab.update({w: int(f) for (w, f) in cur.fetchall()})
 
-            # Normalized bigrams store ids, so join back to words for runtime scoring.
+            # Bigrams store integer IDs for space efficiency; join back to string words here.
             cur.execute(
                 """
                 SELECT pw.word, nw.word, b.freq
@@ -534,19 +497,16 @@ class AINotepad(tk.Tk):
             )
             self.bigram.update({(a, b): int(f) for (a, b, f) in cur.fetchall()})
         except Exception:
-            # Update instance state field `db` so later UI logic can reuse it.
             self.db = None
 
     def _db_queue_update(self, word_counts: Counter, bigram_counts: Counter):
         """No-op: runtime writes are intentionally disabled in read-only mode."""
         # Read-only: no DB updates after initial seed
-        # Exit the function when no further work is needed.
         return
 
     def _db_flush(self):
         """Clear pending in-memory write queues (kept for compatibility)."""
         # Read-only: no DB writes during app runtime
-        # Update instance state field `_after_db_flush` so later UI logic can reuse it.
         self._after_db_flush = None
         self.db_pending_words.clear()
         self.db_pending_bigrams.clear()
@@ -580,9 +540,7 @@ class AINotepad(tk.Tk):
         btn("Save", self.save_file)
         btn("Correct All", self.correct_document)  # <- ONLY THIS ONE
 
-        # Update instance state field `status` so later UI logic can reuse it.
         self.status = tk.Label(top, text=f"Model: {MODEL}", bg=PANEL, fg=MUTED, font=("Segoe UI", 13))
-        # Update instance state field `status.pack(side` so later UI logic can reuse it.
         self.status.pack(side="right", padx=12)
 
         wrap = tk.Frame(self, bg=BG)
@@ -594,14 +552,12 @@ class AINotepad(tk.Tk):
         inner = tk.Frame(border, bg=BG, padx=1, pady=1)
         inner.pack(fill="both", expand=True)
 
-        # Update instance state field `text` so later UI logic can reuse it.
         self.text = tk.Text(
             inner,
             wrap="word",
             undo=True,
             bg=BG,
             fg=FG,
-            # Capture text positions used to target edits and highlight ranges accurately.
             insertbackground=FG,
             selectbackground=SEL_BG,
             selectforeground=FG,
@@ -612,31 +568,24 @@ class AINotepad(tk.Tk):
             font=FONT_EDIT,
             spacing1=2, spacing2=2, spacing3=2,
         )
-        # Update instance state field `text.pack(side` so later UI logic can reuse it.
         self.text.pack(side="left", fill="both", expand=True)
 
         scroll = tk.Scrollbar(inner, command=self.text.yview)
         scroll.pack(side="right", fill="y")
-        # Update instance state field `text.config(yscrollcommand` so later UI logic can reuse it.
         self.text.config(yscrollcommand=scroll.set)
 
-        # Update instance state field `text.tag_configure("ai_bad", underline` so later UI logic can reuse it.
         self.text.tag_configure("ai_bad", underline=True, background=BAD_BG)
 
         # Ghost text (inline)
-        # Update instance state field `ghost` so later UI logic can reuse it.
         self.ghost = tk.Label(self.text, text="", bg=BG, fg=GHOST, font=FONT_EDIT)
         self.ghost.place_forget()
 
         # WORD POPUP (inside text widget)
-        # Update instance state field `word_popup` so later UI logic can reuse it.
         self.word_popup = tk.Frame(self.text, bg=PANEL, highlightthickness=1, highlightbackground=BORDER)
         self.word_popup.place_forget()
-        # Update instance state field `word_btns` so later UI logic can reuse it.
         self.word_btns = []
         for i in range(POPUP_MAX_ITEMS):
             b = tk.Button(
-                # Update instance state field `word_popup, text` so later UI logic can reuse it.
                 self.word_popup, text="",
                 command=lambda i=i: self.accept_word(i),
                 bg=PANEL, fg=FG,
@@ -650,12 +599,10 @@ class AINotepad(tk.Tk):
             self.word_btns.append(b)
 
         # FIX preview popup (attached to app, scrollable)
-        # Update instance state field `fix_popup` so later UI logic can reuse it.
         self.fix_popup = tk.Toplevel(self)
         self.fix_popup.withdraw()
         self.fix_popup.overrideredirect(True)
         self.fix_popup.transient(self)
-        # Update instance state field `fix_popup.configure(bg` so later UI logic can reuse it.
         self.fix_popup.configure(bg=POPUP_SHADOW)
         try:
             self.fix_popup.attributes("-topmost", False)
@@ -667,14 +614,12 @@ class AINotepad(tk.Tk):
             except Exception:
                 pass
 
-        # Update instance state field `fix_frame` so later UI logic can reuse it.
         self.fix_frame = tk.Frame(
             self.fix_popup,
             bg=POPUP_BG,
             highlightthickness=1,
             highlightbackground=POPUP_BORDER,
         )
-        # Update instance state field `fix_frame.pack(fill` so later UI logic can reuse it.
         self.fix_frame.pack(fill="both", expand=True, padx=6, pady=6)
 
         header = tk.Frame(self.fix_frame, bg=POPUP_HEADER)
@@ -715,13 +660,11 @@ class AINotepad(tk.Tk):
         body = tk.Frame(self.fix_frame, bg=POPUP_BG)
         body.pack(side="top", fill="both", expand=True, padx=12, pady=(10, 12))
 
-        # Update instance state field `fix_view` so later UI logic can reuse it.
         self.fix_view = tk.Text(
             body,
             wrap="word",
             bg=POPUP_BG,
             fg=FG,
-            # Capture text positions used to target edits and highlight ranges accurately.
             insertbackground=FG,
             relief="flat",
             borderwidth=0,
@@ -730,10 +673,8 @@ class AINotepad(tk.Tk):
             pady=8,
             highlightthickness=0,
         )
-        # Update instance state field `fix_view.pack(side` so later UI logic can reuse it.
         self.fix_view.pack(side="left", fill="both", expand=True)
 
-        # Update instance state field `fix_scroll` so later UI logic can reuse it.
         self.fix_scroll = tk.Scrollbar(
             body,
             command=self.fix_view.yview,
@@ -742,23 +683,18 @@ class AINotepad(tk.Tk):
             activebackground=POPUP_BORDER,
             relief="flat",
         )
-        # Update instance state field `fix_scroll.pack(side` so later UI logic can reuse it.
         self.fix_scroll.pack(side="right", fill="y")
-        # Update instance state field `fix_view.config(yscrollcommand` so later UI logic can reuse it.
         self.fix_view.config(yscrollcommand=self.fix_scroll.set)
-        # Update instance state field `fix_view.config(state` so later UI logic can reuse it.
         self.fix_view.config(state="disabled")
 
         bottom = tk.Frame(self, bg=PANEL, highlightthickness=1, highlightbackground=BORDER)
         bottom.pack(side="bottom", fill="x")
 
-        # Update instance state field `hint` so later UI logic can reuse it.
         self.hint = tk.Label(
             bottom,
             text="TAB apply fix / accept ghost | Ctrl+Space cycle word | Ctrl+Shift+Enter correct ALL (preview) | ESC close",
             bg=PANEL, fg=MUTED, font=FONT_UI, anchor="w"
         )
-        # Update instance state field `hint.pack(side` so later UI logic can reuse it.
         self.hint.pack(side="left", padx=10, pady=6)
 
     # ---------------- Keys ----------------
@@ -775,32 +711,21 @@ class AINotepad(tk.Tk):
         self.bind("<Control-Shift-Return>", lambda e: self.correct_document())
         self.bind("<Control-space>", lambda e: self.on_ctrl_space())
 
-        # Update instance state field `text.bind("<KeyPress-Tab>", self.on_tab, add` so later UI logic can reuse it.
         self.text.bind("<KeyPress-Tab>", self.on_tab, add=False)
-        # Update instance state field `text.bind("<Escape>", lambda e: self.hide_fix_popup() or self.hide_word_popup() or self.hide_ghost(), add` so later UI logic can reuse it.
         self.text.bind("<Escape>", lambda e: self.hide_fix_popup() or self.hide_word_popup() or self.hide_ghost(), add=True)
-        # Update instance state field `text.bind("<Up>", self.on_up, add` so later UI logic can reuse it.
         self.text.bind("<Up>", self.on_up, add=True)
-        # Update instance state field `text.bind("<Down>", self.on_down, add` so later UI logic can reuse it.
         self.text.bind("<Down>", self.on_down, add=True)
 
         self.text.bind("<KeyRelease>", self.on_key_release)
         self.text.bind("<ButtonRelease-1>", self.on_key_release)
 
-        # Update instance state field `bind("<Configure>", lambda e: self.after(0, self._reposition_fix_popup), add` so later UI logic can reuse it.
         self.bind("<Configure>", lambda e: self.after(0, self._reposition_fix_popup), add=True)
-        # Update instance state field `text.bind("<Configure>", lambda e: self.after(0, self._reposition_fix_popup), add` so later UI logic can reuse it.
         self.text.bind("<Configure>", lambda e: self.after(0, self._reposition_fix_popup), add=True)
-        # Update instance state field `text.bind("<MouseWheel>", lambda e: self.after(0, self._reposition_fix_popup) or self.after(0, self.reposition_word_popup) or self.after(0, self.update_ghost_position), add` so later UI logic can reuse it.
         self.text.bind("<MouseWheel>", lambda e: self.after(0, self._reposition_fix_popup) or self.after(0, self.reposition_word_popup) or self.after(0, self.update_ghost_position), add=True)
-        # Update instance state field `text.bind("<Button-4>", lambda e: self.after(0, self._reposition_fix_popup) or self.after(0, self.reposition_word_popup) or self.after(0, self.update_ghost_position), add` so later UI logic can reuse it.
         self.text.bind("<Button-4>", lambda e: self.after(0, self._reposition_fix_popup) or self.after(0, self.reposition_word_popup) or self.after(0, self.update_ghost_position), add=True)
-        # Update instance state field `text.bind("<Button-5>", lambda e: self.after(0, self._reposition_fix_popup) or self.after(0, self.reposition_word_popup) or self.after(0, self.update_ghost_position), add` so later UI logic can reuse it.
         self.text.bind("<Button-5>", lambda e: self.after(0, self._reposition_fix_popup) or self.after(0, self.reposition_word_popup) or self.after(0, self.update_ghost_position), add=True)
 
-        # Update instance state field `bind("<FocusOut>", lambda e: self.hide_fix_popup() or self.hide_word_popup() or self.hide_ghost(), add` so later UI logic can reuse it.
         self.bind("<FocusOut>", lambda e: self.hide_fix_popup() or self.hide_word_popup() or self.hide_ghost(), add=True)
-        # Update instance state field `bind("<Unmap>", lambda e: self.hide_fix_popup() or self.hide_word_popup() or self.hide_ghost(), add` so later UI logic can reuse it.
         self.bind("<Unmap>", lambda e: self.hide_fix_popup() or self.hide_word_popup() or self.hide_ghost(), add=True)
 
     # ---------------- File ops ----------------
@@ -817,35 +742,28 @@ class AINotepad(tk.Tk):
     def new_file(self):
         """Start a new empty document and reset pending AI state."""
         if not self.confirm_discard_changes():
-            # Exit the function when no further work is needed.
             return
         self.text.delete("1.0", "end")
         self.text.edit_modified(False)
-        # Update instance state field `filepath` so later UI logic can reuse it.
         self.filepath = None
         self.clear_ai()
 
     def open_file(self):
         """Open a text file into the editor and clear transient AI overlays."""
         if not self.confirm_discard_changes():
-            # Exit the function when no further work is needed.
             return
         path = filedialog.askopenfilename(filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
         if not path:
-            # Exit the function when no further work is needed.
             return
         try:
-            # Use a managed context to ensure cleanup happens automatically.
             with open(path, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read()
         except Exception as e:
             messagebox.showerror("Open error", str(e))
-            # Exit the function when no further work is needed.
             return
         self.text.delete("1.0", "end")
         self.text.insert("1.0", content)
         self.text.edit_modified(False)
-        # Update instance state field `filepath` so later UI logic can reuse it.
         self.filepath = path
         self.clear_ai()
 
@@ -854,7 +772,6 @@ class AINotepad(tk.Tk):
         if not self.filepath:
             return self.save_as()
         try:
-            # Use a managed context to ensure cleanup happens automatically.
             with open(self.filepath, "w", encoding="utf-8") as f:
                 f.write(self.text.get("1.0", "end-1c"))
             self.text.edit_modified(False)
@@ -873,7 +790,6 @@ class AINotepad(tk.Tk):
         )
         if not path:
             return False
-        # Update instance state field `filepath` so later UI logic can reuse it.
         self.filepath = path
         return self.save_file()
 
@@ -895,31 +811,23 @@ class AINotepad(tk.Tk):
     def set_status(self, txt: str):
         """Update status bar, optionally hiding runtime error details."""
         if SHOW_MODEL_ERRORS_IN_STATUS:
-            # Update instance state field `status.config(text` so later UI logic can reuse it.
             self.status.config(text=txt)
-        # Fallback branch when previous conditions did not match.
         else:
-            # Update instance state field `status.config(text` so later UI logic can reuse it.
             self.status.config(text=f"Model: {MODEL}")
 
     def _report_model_error(self, err: Exception):
         """Display transient model errors in status bar."""
         if not SHOW_MODEL_ERRORS_IN_STATUS:
-            # Exit the function when no further work is needed.
             return
 
         msg = f"LLM error: {err}"
 
         def ui():
-            # Update instance state field `status.config(text` so later UI logic can reuse it.
             self.status.config(text=msg)
             if self._after_model_error:
-                # Schedule this callback on Tk's event loop for deferred execution.
                 self.after_cancel(self._after_model_error)
-            # Update instance state field `_after_model_error` so later UI logic can reuse it.
             self._after_model_error = self.after(4500, lambda: self.status.config(text=f"Model: {MODEL}"))
 
-        # Schedule this callback on Tk's event loop for deferred execution.
         self.after(0, ui)
 
     def _predict_limit(self, text_len: int) -> int:
@@ -937,9 +845,7 @@ class AINotepad(tk.Tk):
         try:
             data = get_ollama_client().list()
         except Exception as e:
-            # Update instance state field `_model_available` so later UI logic can reuse it.
             self._model_available = False
-            # Update instance state field `_model_checked_at` so later UI logic can reuse it.
             self._model_checked_at = now
             self._report_model_error(e)
             return False
@@ -951,16 +857,12 @@ class AINotepad(tk.Tk):
                 names.add(name)
 
         if MODEL not in names:
-            # Update instance state field `_model_available` so later UI logic can reuse it.
             self._model_available = False
-            # Update instance state field `_model_checked_at` so later UI logic can reuse it.
             self._model_checked_at = now
             self._report_model_error(RuntimeError(f"Model not found: {MODEL}"))
             return False
 
-        # Update instance state field `_model_available` so later UI logic can reuse it.
         self._model_available = True
-        # Update instance state field `_model_checked_at` so later UI logic can reuse it.
         self._model_checked_at = now
         return True
 
@@ -968,17 +870,16 @@ class AINotepad(tk.Tk):
         """Single call path for Ollama requests with error propagation."""
         try:
             if not self._ensure_model_available():
-                # Surface this error so callers can stop or recover appropriately.
                 raise RuntimeError(f"Model not available: {MODEL}")
             client = get_ollama_client()
+            # Serialise LLM calls with a lock so concurrent fix/suggestion requests don't
+            # overload the local Ollama server and produce garbled interleaved responses.
             if LLM_SERIAL:
-                # Use a managed context to ensure cleanup happens automatically.
                 with self._llm_lock:
                     return client.chat(model=MODEL, messages=messages, options=options)
             return client.chat(model=MODEL, messages=messages, options=options)
         except Exception as e:
             self._report_model_error(e)
-            # Surface this error so callers can stop or recover appropriately.
             raise
 
     def clear_ai(self):
@@ -987,22 +888,16 @@ class AINotepad(tk.Tk):
         self.hide_word_popup()
         self.hide_ghost()
         if self._after_next:
-            # Schedule this callback on Tk's event loop for deferred execution.
             self.after_cancel(self._after_next)
-            # Update instance state field `_after_next` so later UI logic can reuse it.
             self._after_next = None
         self.text.tag_remove("ai_bad", "1.0", "end")
-        # Update instance state field `fix_start` so later UI logic can reuse it.
         self.fix_start = self.fix_end = None
-        # Update instance state field `fix_original` so later UI logic can reuse it.
         self.fix_original = self.fix_corrected = ""
-        # Update instance state field `fix_version` so later UI logic can reuse it.
         self.fix_version = -1
 
     def update_lang(self):
         """Detect active language from recent text before the caret."""
         before = self.text.get("1.0", "insert")[-900:]
-        # Update instance state field `lang` so later UI logic can reuse it.
         self.lang = detect_lang(before)
 
     def get_context(self):
@@ -1015,7 +910,6 @@ class AINotepad(tk.Tk):
 
     def get_prev_word(self):
         """Return token preceding current word fragment for bigram scoring."""
-        # Capture text positions used to target edits and highlight ranges accurately.
         insert = self.text.index("insert")
         before = self.text.get("1.0", insert)[-240:]
         tokens = re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ'’-]+", before)
@@ -1025,40 +919,27 @@ class AINotepad(tk.Tk):
 
     def get_word_under_cursor(self):
         """Resolve word boundaries at caret and return full word + left fragment."""
-        # Capture text positions used to target edits and highlight ranges accurately.
         insert = self.text.index("insert")
-        # Capture text positions used to target edits and highlight ranges accurately.
         line_start = self.text.index("insert linestart")
-        # Capture text positions used to target edits and highlight ranges accurately.
         line_end = self.text.index("insert lineend")
 
-        # Capture text positions used to target edits and highlight ranges accurately.
         start = insert
-        # Repeat this block until the loop condition is no longer true.
         while True:
             prev = self.text.index(f"{start}-1c")
             if self.text.compare(prev, "<", line_start):
-                # Stop iterating once the target condition has been reached.
                 break
             ch = self.text.get(prev, start)
             if not ch or not WORD_CHAR_RE.fullmatch(ch):
-                # Stop iterating once the target condition has been reached.
                 break
-            # Capture text positions used to target edits and highlight ranges accurately.
             start = prev
 
-        # Capture text positions used to target edits and highlight ranges accurately.
         end = insert
-        # Repeat this block until the loop condition is no longer true.
         while True:
             if self.text.compare(end, ">=", line_end):
-                # Stop iterating once the target condition has been reached.
                 break
             ch = self.text.get(end, f"{end}+1c")
             if not ch or not WORD_CHAR_RE.fullmatch(ch):
-                # Stop iterating once the target condition has been reached.
                 break
-            # Capture text positions used to target edits and highlight ranges accurately.
             end = self.text.index(f"{end}+1c")
 
         full = self.text.get(start, end)
@@ -1070,24 +951,19 @@ class AINotepad(tk.Tk):
     # ---------------- Ghost ----------------
     def hide_ghost(self):
         """Hide inline ghost suggestion text."""
-        # Update instance state field `ghost.config(text` so later UI logic can reuse it.
         self.ghost.config(text="")
         self.ghost.place_forget()
-        # Update instance state field `ghost_mode` so later UI logic can reuse it.
         self.ghost_mode = "none"
 
     def update_ghost_position(self):
         """Keep ghost label anchored to current cursor location."""
         if not self.ghost.cget("text"):
-            # Exit the function when no further work is needed.
             return
         bbox = self.text.bbox("insert")
         if not bbox:
             self.ghost.place_forget()
-            # Exit the function when no further work is needed.
             return
         x, y, w, h = bbox
-        # Update instance state field `ghost.place(x` so later UI logic can reuse it.
         self.ghost.place(x=x + 1, y=y - 1)
 
     def set_ghost(self, text: str, mode: str):
@@ -1095,11 +971,8 @@ class AINotepad(tk.Tk):
         text = text or ""
         if not text.strip():
             self.hide_ghost()
-            # Exit the function when no further work is needed.
             return
-        # Update instance state field `ghost.config(text` so later UI logic can reuse it.
         self.ghost.config(text=text)
-        # Update instance state field `ghost_mode` so later UI logic can reuse it.
         self.ghost_mode = mode
         self.update_ghost_position()
 
@@ -1124,7 +997,6 @@ class AINotepad(tk.Tk):
         for k in range(overlap, 0, -1):
             if tail.endswith(suggestion[:k]):
                 suggestion = suggestion[k:]
-                # Stop iterating once the target condition has been reached.
                 break
 
         suggestion = suggestion.lstrip()
@@ -1142,27 +1014,21 @@ class AINotepad(tk.Tk):
     def _auto_space_after_accept(self):
         """Insert a trailing space after accepted word suggestion when safe."""
         if not AUTO_SPACE_AFTER_ACCEPT:
-            # Exit the function when no further work is needed.
             return
         nxt = self.text.get("insert", "insert+1c")
         if nxt and (nxt.isalnum() or nxt in PUNCT_CHARS):
-            # Exit the function when no further work is needed.
             return
         if nxt == " ":
-            # Exit the function when no further work is needed.
             return
         self.text.insert("insert", " ")
 
     def _maybe_remove_space_before_punct(self, event):
         """Delete pre-punctuation space for cleaner typography."""
         if not NO_SPACE_BEFORE_PUNCT:
-            # Exit the function when no further work is needed.
             return
         if not event or not getattr(event, "char", ""):
-            # Exit the function when no further work is needed.
             return
         if event.char not in PUNCT_CHARS:
-            # Exit the function when no further work is needed.
             return
         punct_i = self.text.index("insert-1c")
         prev = self.text.get(f"{punct_i}-1c", punct_i)
@@ -1173,11 +1039,8 @@ class AINotepad(tk.Tk):
     def hide_word_popup(self):
         """Hide candidate popup and clear navigation state."""
         self.word_popup.place_forget()
-        # Update instance state field `word_items` so later UI logic can reuse it.
         self.word_items = []
-        # Update instance state field `word_idx` so later UI logic can reuse it.
         self.word_idx = 0
-        # Update instance state field `word_span` so later UI logic can reuse it.
         self.word_span = None
         self._update_hint()
 
@@ -1186,23 +1049,17 @@ class AINotepad(tk.Tk):
         items = uniq_keep_order(items)[:POPUP_MAX_ITEMS]
         if not items:
             self.hide_word_popup()
-            # Exit the function when no further work is needed.
             return
 
-        # Update instance state field `word_items` so later UI logic can reuse it.
         self.word_items = items
-        # Update instance state field `word_idx` so later UI logic can reuse it.
         self.word_idx = 0
-        # Update instance state field `word_span` so later UI logic can reuse it.
         self.word_span = (word_start, word_end, full_word)
-        # Update instance state field `word_frag` so later UI logic can reuse it.
         self.word_frag = frag
 
         for i, b in enumerate(self.word_btns):
             if i < len(items):
                 b.config(text=items[i], state="normal")
                 b.pack(fill="x")
-            # Fallback branch when previous conditions did not match.
             else:
                 b.config(text="", state="disabled")
                 b.pack_forget()
@@ -1215,46 +1072,35 @@ class AINotepad(tk.Tk):
             suf = best[len(frag):]
             if suf:
                 self.set_ghost(suf, "word")
-            # Fallback branch when previous conditions did not match.
             else:
                 self.hide_ghost()
-        # Fallback branch when previous conditions did not match.
         else:
             self.hide_ghost()
 
     def reposition_word_popup(self):
         """Reposition popup under caret on move/scroll."""
         if not self.word_items:
-            # Exit the function when no further work is needed.
             return
         bbox = self.text.bbox("insert")
         if not bbox:
             self.hide_word_popup()
-            # Exit the function when no further work is needed.
             return
         x, y, w, h = bbox
-        # Update instance state field `word_popup.place(x` so later UI logic can reuse it.
         self.word_popup.place(x=x, y=y + h + 6)
 
     def accept_word(self, idx=0):
         """Replace current token with selected candidate."""
         if not self.word_items or idx < 0 or idx >= len(self.word_items):
-            # Exit the function when no further work is needed.
             return
         if not self.word_span:
-            # Exit the function when no further work is needed.
             return
-        # Capture text positions used to target edits and highlight ranges accurately.
         start, end, original = self.word_span
         cur = self.text.get(start, end)
         if cur != original:
             s2, e2, full2, frag2 = self.get_word_under_cursor()
             if not s2:
-                # Exit the function when no further work is needed.
                 return
-            # Capture text positions used to target edits and highlight ranges accurately.
             start, end, original = s2, e2, full2
-            # Update instance state field `word_span` so later UI logic can reuse it.
             self.word_span = (start, end, original)
 
         chosen = self.word_items[idx]
@@ -1270,7 +1116,6 @@ class AINotepad(tk.Tk):
         """Move suggestion selection up."""
         if not self.word_items:
             return None
-        # Update instance state field `word_idx` so later UI logic can reuse it.
         self.word_idx = max(0, self.word_idx - 1)
         self._update_hint()
         best = self.word_items[self.word_idx]
@@ -1284,7 +1129,6 @@ class AINotepad(tk.Tk):
         """Move suggestion selection down."""
         if not self.word_items:
             return None
-        # Update instance state field `word_idx` so later UI logic can reuse it.
         self.word_idx = min(len(self.word_items) - 1, self.word_idx + 1)
         self._update_hint()
         best = self.word_items[self.word_idx]
@@ -1297,15 +1141,11 @@ class AINotepad(tk.Tk):
     def on_ctrl_space(self):
         """Cycle current suggestions or force a new suggestion request."""
         if self.word_items:
-            # Update instance state field `word_idx` so later UI logic can reuse it.
             self.word_idx = (self.word_idx + 1) % len(self.word_items)
             self._update_hint()
-            # Exit the function when no further work is needed.
             return
         if self._after_word:
-            # Schedule this callback on Tk's event loop for deferred execution.
             self.after_cancel(self._after_word)
-        # Update instance state field `request_word_suggestions(force` so later UI logic can reuse it.
         self.request_word_suggestions(force=True)
 
     def _update_hint(self):
@@ -1314,10 +1154,8 @@ class AINotepad(tk.Tk):
         if self.word_items:
             parts = []
             for i, w in enumerate(self.word_items):
-                # Capture text positions used to target edits and highlight ranges accurately.
                 parts.append(f"[{w}]" if i == self.word_idx else w)
             base += "   |   Words: " + " / ".join(parts)
-        # Update instance state field `hint.config(text` so later UI logic can reuse it.
         self.hint.config(text=base)
 
     # ---------------- TAB ----------------
@@ -1348,35 +1186,26 @@ class AINotepad(tk.Tk):
     def _index_word(self, word: str):
         """Index one word by normalized prefix for fast lookup."""
         if not word:
-            # Exit the function when no further work is needed.
             return
         w = word.strip().lower()
         if not w or w in self.vocab_norm:
-            # Exit the function when no further work is needed.
             return
         wn = strip_accents(w)
         if not wn:
-            # Exit the function when no further work is needed.
             return
-        # Update instance state field `vocab_norm[w]` so later UI logic can reuse it.
         self.vocab_norm[w] = wn
         key = wn[:PREFIX_INDEX_LEN]
         if not key:
-            # Exit the function when no further work is needed.
             return
         bucket = self.vocab_by_prefix.get(key)
         if bucket is None:
-            # Update instance state field `vocab_by_prefix[key]` so later UI logic can reuse it.
             self.vocab_by_prefix[key] = {w}
-        # Fallback branch when previous conditions did not match.
         else:
             bucket.add(w)
 
     def _rebuild_vocab_index(self):
         """Rebuild prefix buckets from current in-memory vocabulary."""
-        # Update instance state field `vocab_norm` so later UI logic can reuse it.
         self.vocab_norm = {}
-        # Update instance state field `vocab_by_prefix` so later UI logic can reuse it.
         self.vocab_by_prefix = {}
         for w in self.vocab:
             self._index_word(w)
@@ -1384,21 +1213,16 @@ class AINotepad(tk.Tk):
     def schedule_vocab_rebuild(self):
         """Debounce vocabulary rebuild triggered by typing activity."""
         if self._after_vocab:
-            # Schedule this callback on Tk's event loop for deferred execution.
             self.after_cancel(self._after_vocab)
-        # Update instance state field `_after_vocab` so later UI logic can reuse it.
         self._after_vocab = self.after(VOCAB_REBUILD_MS, self.rebuild_vocab)
 
     def rebuild_vocab(self):
         """Learn recent words and bigrams from editor tail window."""
-        # Update instance state field `_after_vocab` so later UI logic can reuse it.
         self._after_vocab = None
         text = self.text.get("1.0", "end-1c")
         tail = text[-VOCAB_WINDOW_CHARS:]
         if tail == self._last_vocab_tail:
-            # Exit the function when no further work is needed.
             return
-        # Update instance state field `_last_vocab_tail` so later UI logic can reuse it.
         self._last_vocab_tail = tail
 
         words = re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,}", tail)
@@ -1416,7 +1240,8 @@ class AINotepad(tk.Tk):
         for w in wc:
             self._index_word(w)
 
-        # DB stays read-only after initial seed
+        # DB stays read-only at runtime: new words are only learned in memory (self.vocab),
+        # not written back to SQLite. This keeps the UI fast and avoids write contention.
 
     def local_candidates_scored(self, frag: str, prev: str, lang: str):
         """Rank local candidates using prefix, frequency, bigram, and fuzzy score."""
@@ -1438,12 +1263,11 @@ class AINotepad(tk.Tk):
             wn = self.vocab_norm.get(w)
             if not wn:
                 wn = strip_accents(w)
-                # Update instance state field `vocab_norm[w]` so later UI logic can reuse it.
                 self.vocab_norm[w] = wn
             if wn.startswith(frag_n):
                 score = float(self.vocab.get(w, 1))
                 if prev:
-                    score += 8.0 * self.bigram.get((prev, w), 0)
+                    score += 8.0 * self.bigram.get((prev, w), 0)  # Bigram bonus weighted 8x to strongly prefer contextually fitting words.
                 scored.append((score, w))
 
         use_fuzzy = ENABLE_FUZZY and len(frag_n) >= 3 and (not scored or not FUZZY_ONLY_IF_NO_PREFIX)
@@ -1478,15 +1302,12 @@ class AINotepad(tk.Tk):
         try:
             if event is not None and event.keysym in (
                 "Shift_L","Shift_R","Control_L","Control_R","Alt_L","Alt_R","Caps_Lock"
-            # Open a new indented block that groups the next logical steps.
             ):
-                # Exit the function when no further work is needed.
                 return
 
             self._maybe_remove_space_before_punct(event)
 
-            # Update instance state field `doc_version +` so later UI logic can reuse it.
-            self.doc_version += 1
+            self.doc_version += 1  # Version stamp; async callbacks compare against this to discard stale results.
             self.update_lang()
 
             if self.ghost_mode == "next":
@@ -1496,7 +1317,6 @@ class AINotepad(tk.Tk):
 
             self.update_ghost_position()
             self.reposition_word_popup()
-            # Schedule this callback on Tk's event loop for deferred execution.
             self.after(0, self._reposition_fix_popup)
 
             s, e, full, frag = self.get_word_under_cursor()
@@ -1505,48 +1325,38 @@ class AINotepad(tk.Tk):
                 local = self.local_candidates_scored(frag, prev, self.lang)
                 if local:
                     self.show_word_popup(local, s, e, full, frag)
-                # Fallback branch when previous conditions did not match.
                 else:
                     self.hide_word_popup()
-            # Fallback branch when previous conditions did not match.
             else:
                 self.hide_word_popup()
 
+            # Cancel pending debounce timers and restart them; this ensures requests
+            # are only sent once the user pauses typing for the configured delay.
             if self._after_word:
-                # Schedule this callback on Tk's event loop for deferred execution.
                 self.after_cancel(self._after_word)
-            # Update instance state field `_after_word` so later UI logic can reuse it.
             self._after_word = self.after(WORD_DEBOUNCE_MS, self.request_word_suggestions)
 
             if self._after_fix:
-                # Schedule this callback on Tk's event loop for deferred execution.
                 self.after_cancel(self._after_fix)
-            # Update instance state field `_after_fix` so later UI logic can reuse it.
             self._after_fix = self.after(FIX_DEBOUNCE_MS, self.request_block_fix)
 
             if self._after_next:
-                # Schedule this callback on Tk's event loop for deferred execution.
                 self.after_cancel(self._after_next)
-            # Update instance state field `_after_next` so later UI logic can reuse it.
             self._after_next = self.after(NEXT_GHOST_DEBOUNCE_MS, self.request_next_ghost)
 
         except Exception:
             # Never show user stack traces
-            # Exit the function when no further work is needed.
             return
 
     # ---------------- AI: WORD suggestions (optional) ----------------
     def request_word_suggestions(self, force: bool = False):
         """Ask LLM for word completions and merge with local ranking."""
-        # Update instance state field `_after_word` so later UI logic can reuse it.
         self._after_word = None
         if not USE_LLM_WORD_SUGGESTIONS and not force:
-            # Exit the function when no further work is needed.
             return
 
         s, e, full, frag = self.get_word_under_cursor()
         if not s or len(frag) < max(3, MIN_WORD_FRAGMENT):
-            # Exit the function when no further work is needed.
             return
 
         lang = self.lang
@@ -1557,12 +1367,12 @@ class AINotepad(tk.Tk):
             merged = uniq_keep_order(self.word_cache[key] + self.local_candidates_scored(frag, prev, lang))[:POPUP_MAX_ITEMS]
             if merged:
                 self.show_word_popup(merged, s, e, full, frag)
-            # Exit the function when no further work is needed.
             return
 
         ctx = self.get_context()
+        # Snapshot version and create a monotonically increasing request ID.
+        # The worker thread checks both before touching the UI to avoid showing stale results.
         req_version = self.doc_version
-        # Update instance state field `_word_req +` so later UI logic can reuse it.
         self._word_req += 1
         req_id = self._word_req
 
@@ -1577,10 +1387,8 @@ class AINotepad(tk.Tk):
             def ui():
                 # Ignore stale results if user has typed since request started.
                 if req_id != self._word_req or req_version != self.doc_version:
-                    # Exit the function when no further work is needed.
                     return
                 if suggestions:
-                    # Update instance state field `word_cache[key]` so later UI logic can reuse it.
                     self.word_cache[key] = suggestions
                     merged = uniq_keep_order(suggestions + self.local_candidates_scored(frag, prev, lang))[:POPUP_MAX_ITEMS]
                     if merged:
@@ -1588,17 +1396,14 @@ class AINotepad(tk.Tk):
                         if s2:
                             self.show_word_popup(merged, s2, e2, full2, frag2)
 
-            # Schedule this callback on Tk's event loop for deferred execution.
             self.after(0, ui)
 
-        # Dispatch this work in a background thread to keep UI interactions responsive.
         threading.Thread(target=worker, daemon=True).start()
 
     def ask_word_suggestions_plain(self, context: str, prev_word: str, fragment: str, lang: str):
         """Return sanitized word-only suggestions from the model output."""
         if lang == "fr":
             system = "Rôle: éditeur. Donne 1 à 3 mots (un par ligne). Pas d'explications. Un seul mot sans espaces."
-        # Fallback branch when previous conditions did not match.
         else:
             system = "Role: editor. Suggest 1 to 3 words (one per line). No extra text. Single word, no spaces."
 
@@ -1630,35 +1435,27 @@ class AINotepad(tk.Tk):
     # ---------------- AI: NEXT ghost (Copilot-like) ----------------
     def request_next_ghost(self):
         """Request short continuation ghost text when cursor context is valid."""
-        # Update instance state field `_after_next` so later UI logic can reuse it.
         self._after_next = None
         if not USE_LLM_NEXT_GHOST:
-            # Exit the function when no further work is needed.
             return
         if self.word_items:
-            # Exit the function when no further work is needed.
             return
         if self.text.tag_ranges("sel"):
-            # Exit the function when no further work is needed.
             return
 
         ahead = self.text.get("insert", "insert+1c")
         if ahead and WORD_CHAR_RE.fullmatch(ahead):
-            # Exit the function when no further work is needed.
             return
 
         before_text = self.get_cursor_context()
         if len(before_text.strip()) < NEXT_GHOST_MIN_INPUT:
-            # Exit the function when no further work is needed.
             return
         if before_text.endswith("\n"):
-            # Exit the function when no further work is needed.
             return
 
         lang = self.lang
         ctx = before_text[-NEXT_GHOST_CONTEXT_CHARS:]
         req_version = self.doc_version
-        # Update instance state field `_ghost_req +` so later UI logic can reuse it.
         self._ghost_req += 1
         req_id = self._ghost_req
 
@@ -1674,19 +1471,15 @@ class AINotepad(tk.Tk):
             def ui():
                 # Discard stale continuation responses.
                 if req_id != self._ghost_req or req_version != self.doc_version:
-                    # Exit the function when no further work is needed.
                     return
                 if suggestion and not self.word_items:
                     self.set_ghost(suggestion, "next")
-                # Fallback branch when previous conditions did not match.
                 else:
                     if self.ghost_mode == "next":
                         self.hide_ghost()
 
-            # Schedule this callback on Tk's event loop for deferred execution.
             self.after(0, ui)
 
-        # Dispatch this work in a background thread to keep UI interactions responsive.
         threading.Thread(target=worker, daemon=True).start()
 
     def ask_next_ghost_plain(self, context: str, lang: str) -> str:
@@ -1703,7 +1496,6 @@ class AINotepad(tk.Tk):
                 "Donne 1 à 3 mots (max ~12 caractères), SANS retour à la ligne. "
                 "Réponds uniquement avec la suite."
             )
-        # Fallback branch when previous conditions did not match.
         else:
             system = (
                 "Role: editor (not a chatbot). "
@@ -1723,38 +1515,25 @@ class AINotepad(tk.Tk):
     # ---------------- Fix region ----------------
     def get_fix_region(self):
         """Return the current paragraph-like block bounded by blank lines."""
-        # Capture text positions used to target edits and highlight ranges accurately.
         insert = self.text.index("insert")
-        # Capture text positions used to target edits and highlight ranges accurately.
         cur_line = int(insert.split(".")[0])
-        # Capture text positions used to target edits and highlight ranges accurately.
         last_line = int(self.text.index("end-1c").split(".")[0])
 
-        # Capture text positions used to target edits and highlight ranges accurately.
         start_line = cur_line
-        # Repeat this block until the loop condition is no longer true.
         while start_line > 1:
             prev = self.text.get(f"{start_line-1}.0", f"{start_line-1}.end")
             if prev.strip() == "":
-                # Stop iterating once the target condition has been reached.
                 break
-            # Capture text positions used to target edits and highlight ranges accurately.
             start_line -= 1
 
-        # Capture text positions used to target edits and highlight ranges accurately.
         end_line = cur_line
-        # Repeat this block until the loop condition is no longer true.
         while end_line < last_line:
             nxt = self.text.get(f"{end_line+1}.0", f"{end_line+1}.end")
             if nxt.strip() == "":
-                # Stop iterating once the target condition has been reached.
                 break
-            # Capture text positions used to target edits and highlight ranges accurately.
             end_line += 1
 
-        # Capture text positions used to target edits and highlight ranges accurately.
         start = f"{start_line}.0"
-        # Capture text positions used to target edits and highlight ranges accurately.
         end = f"{end_line}.end"
         block = self.text.get(start, end)
         return start, end, block
@@ -1782,12 +1561,10 @@ class AINotepad(tk.Tk):
     def _reposition_fix_popup(self):
         """Position fix popup near caret, with automatic above/below fallback."""
         if not self.fix_popup.winfo_viewable():
-            # Exit the function when no further work is needed.
             return
         bbox = self.text.bbox("insert")
         if not bbox:
             self.hide_fix_popup()
-            # Exit the function when no further work is needed.
             return
         x, y, w0, h0 = bbox
         x_root = self.text.winfo_rootx() + x
@@ -1812,14 +1589,11 @@ class AINotepad(tk.Tk):
         corrected = clean_llm_text(corrected)
         if not corrected or looks_like_chatbot_output(corrected):
             self.hide_fix_popup()
-            # Exit the function when no further work is needed.
             return
 
-        # Update instance state field `fix_view.config(state` so later UI logic can reuse it.
         self.fix_view.config(state="normal")
         self.fix_view.delete("1.0", "end")
         self.fix_view.insert("1.0", corrected)
-        # Update instance state field `fix_view.config(state` so later UI logic can reuse it.
         self.fix_view.config(state="disabled")
         self.fix_view.yview_moveto(0.0)
 
@@ -1836,7 +1610,6 @@ class AINotepad(tk.Tk):
             pass
 
         if len(original) > 6000:
-            # Exit the function when no further work is needed.
             return
 
         sm = difflib.SequenceMatcher(a=original, b=corrected)
@@ -1847,7 +1620,6 @@ class AINotepad(tk.Tk):
                 pos = max(0, min(i1, len(original) - 1))
                 s = f"{start_index}+{pos}c"
                 e = f"{start_index}+{pos+1}c"
-            # Fallback branch when previous conditions did not match.
             else:
                 s = f"{start_index}+{i1}c"
                 e = f"{start_index}+{i2}c"
@@ -1860,21 +1632,16 @@ class AINotepad(tk.Tk):
     def apply_fix(self):
         """Apply accepted fix only if source snapshot still matches editor text."""
         if not (self.fix_corrected and self.fix_start and self.fix_end):
-            # Exit the function when no further work is needed.
             return
         if self.fix_version != self.doc_version:
             self.hide_fix_popup()
-            # Update instance state field `fix_corrected` so later UI logic can reuse it.
             self.fix_corrected = ""
-            # Exit the function when no further work is needed.
             return
 
         current = self.text.get(self.fix_start, self.fix_end)
         if current != self.fix_original:
             self.hide_fix_popup()
-            # Update instance state field `fix_corrected` so later UI logic can reuse it.
             self.fix_corrected = ""
-            # Exit the function when no further work is needed.
             return
 
         self.text.delete(self.fix_start, self.fix_end)
@@ -1883,7 +1650,6 @@ class AINotepad(tk.Tk):
 
         self.text.tag_remove("ai_bad", "1.0", "end")
         self.hide_fix_popup()
-        # Update instance state field `fix_corrected` so later UI logic can reuse it.
         self.fix_corrected = ""
 
     # ---------------- Corrector quality guards ----------------
@@ -1920,7 +1686,6 @@ class AINotepad(tk.Tk):
             )
             if strong:
                 system += " Renvoie TOUT le texte, ligne par ligne."
-        # Fallback branch when previous conditions did not match.
         else:
             system = (
                 "Role: proofreader (not a chatbot). "
@@ -1944,14 +1709,12 @@ class AINotepad(tk.Tk):
 
     def _linewise_fix(self, block: str, lang: str) -> str:
         """Fallback correction that preserves structure line by line."""
-        # Capture text positions used to target edits and highlight ranges accurately.
         lines = block.splitlines(True)
         fixed = []
         for ln in lines:
             if ln.strip() == "":
                 fixed.append(ln)
                 continue
-            # Capture text positions used to target edits and highlight ranges accurately.
             ending = "\n" if ln.endswith("\n") else ""
             raw = ln[:-1] if ending else ln
             corr = self.ask_block_fix_plain(raw, lang, strong=True)
@@ -1961,33 +1724,24 @@ class AINotepad(tk.Tk):
     # ---------------- AI: BLOCK fix (auto preview) ----------------
     def request_block_fix(self):
         """Build correction preview for current block with staged fallbacks."""
-        # Update instance state field `_after_fix` so later UI logic can reuse it.
         self._after_fix = None
         if LLM_SERIAL and self._llm_lock.locked():
-            # Update instance state field `_after_fix` so later UI logic can reuse it.
             self._after_fix = self.after(300, self.request_block_fix)
-            # Exit the function when no further work is needed.
             return
         if not self._ensure_model_available():
             self.hide_fix_popup()
-            # Update instance state field `fix_corrected` so later UI logic can reuse it.
             self.fix_corrected = ""
-            # Exit the function when no further work is needed.
             return
 
-        # Capture text positions used to target edits and highlight ranges accurately.
         start, end, block = self.get_fix_region()
         if not block or len(block.strip()) < 4:
             self.text.tag_remove("ai_bad", "1.0", "end")
             self.hide_fix_popup()
-            # Update instance state field `fix_corrected` so later UI logic can reuse it.
             self.fix_corrected = ""
-            # Exit the function when no further work is needed.
             return
 
         if len(block) > MAX_FIX_CHARS:
             block = block[-MAX_FIX_CHARS:]
-            # Capture text positions used to target edits and highlight ranges accurately.
             start = f"{end}-{len(block)}c"
 
         lang = self.lang
@@ -1996,7 +1750,7 @@ class AINotepad(tk.Tk):
         original_snapshot = block
 
         def worker():
-            # Stage 1: normal correction prompt.
+            # Stage 1: standard prompt, expecting the model to return corrected text directly.
             corrected = original_snapshot
             try:
                 corrected = self.ask_block_fix_plain(original_snapshot, lang, strong=False)
@@ -2029,33 +1783,24 @@ class AINotepad(tk.Tk):
             def ui():
                 # Ignore stale response if document changed meanwhile.
                 if req_id != self._fix_req or req_version != self.doc_version:
-                    # Exit the function when no further work is needed.
                     return
 
                 if corrected.strip() == original_snapshot.strip() or self._is_bad_fix(original_snapshot, corrected):
                     self.text.tag_remove("ai_bad", "1.0", "end")
                     self.hide_fix_popup()
-                    # Update instance state field `fix_corrected` so later UI logic can reuse it.
                     self.fix_corrected = ""
-                    # Exit the function when no further work is needed.
                     return
 
-                # Update instance state field `fix_start, self.fix_end` so later UI logic can reuse it.
                 self.fix_start, self.fix_end = start, end
-                # Update instance state field `fix_original` so later UI logic can reuse it.
                 self.fix_original = original_snapshot
-                # Update instance state field `fix_corrected` so later UI logic can reuse it.
                 self.fix_corrected = corrected
-                # Update instance state field `fix_version` so later UI logic can reuse it.
                 self.fix_version = req_version
 
                 self.underline_diffs(start, original_snapshot, self.fix_corrected)
                 self.show_fix_popup(self.fix_corrected)
 
-            # Schedule this callback on Tk's event loop for deferred execution.
             self.after(0, ui)
 
-        # Dispatch this work in a background thread to keep UI interactions responsive.
         threading.Thread(target=worker, daemon=True).start()
 
     # ---------------- Correct ALL (apply automatically) ----------------
@@ -2063,17 +1808,13 @@ class AINotepad(tk.Tk):
         """Run whole-document correction in chunks and show one preview result."""
         self.update_lang()
         if not self._ensure_model_available():
-            # Exit the function when no further work is needed.
             return
 
-        # Capture text positions used to target edits and highlight ranges accurately.
         start = "1.0"
-        # Capture text positions used to target edits and highlight ranges accurately.
         end = "end-1c"
 
         block = self.text.get(start, end)
         if not block or len(block.strip()) < 4:
-            # Exit the function when no further work is needed.
             return
 
         lang = self.lang
@@ -2083,14 +1824,12 @@ class AINotepad(tk.Tk):
 
         chunks = split_into_chunks(original_snapshot, DOC_CHUNK_CHARS)
         total = len(chunks)
-        # Update instance state field `status.config(text` so later UI logic can reuse it.
         self.status.config(text=f"Correcting… 0/{total}")
 
         def worker():
             out_chunks = []
             for i, ch in enumerate(chunks, start=1):
                 if req_id != self._fix_req:
-                    # Exit the function when no further work is needed.
                     return
                 corrected = ch
                 try:
@@ -2108,48 +1847,35 @@ class AINotepad(tk.Tk):
                     corrected = ch
 
                 out_chunks.append(clean_llm_text(corrected))
-                # Schedule this callback on Tk's event loop for deferred execution.
                 self.after(0, lambda i=i: self.status.config(text=f"Correcting… {i}/{total}"))
 
             # Reassemble corrected chunks in original order.
             corrected_all = "".join(out_chunks)
 
             def ui():
-                # Update instance state field `status.config(text` so later UI logic can reuse it.
                 self.status.config(text=f"Model: {MODEL}")
                 if req_id != self._fix_req or req_version != self.doc_version:
-                    # Exit the function when no further work is needed.
                     return
                 if not corrected_all.strip():
-                    # Exit the function when no further work is needed.
                     return
                 if looks_like_chatbot_output(corrected_all):
-                    # Exit the function when no further work is needed.
                     return
                 if corrected_all.strip() == original_snapshot.strip():
-                    # Exit the function when no further work is needed.
                     return
 
                 # Show preview (same as inline fix)
                 self.hide_ghost()
                 self.hide_word_popup()
-                # Update instance state field `fix_start, self.fix_end` so later UI logic can reuse it.
                 self.fix_start, self.fix_end = start, end
-                # Update instance state field `fix_original` so later UI logic can reuse it.
                 self.fix_original = original_snapshot
-                # Update instance state field `fix_corrected` so later UI logic can reuse it.
                 self.fix_corrected = corrected_all
-                # Update instance state field `fix_version` so later UI logic can reuse it.
                 self.fix_version = req_version
                 self.underline_diffs(start, original_snapshot, self.fix_corrected)
                 self.show_fix_popup(self.fix_corrected)
 
-            # Schedule this callback on Tk's event loop for deferred execution.
             self.after(0, ui)
 
-        # Dispatch this work in a background thread to keep UI interactions responsive.
         threading.Thread(target=worker, daemon=True).start()
-
 
 if __name__ == "__main__":
     AINotepad().mainloop()

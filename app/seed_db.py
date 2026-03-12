@@ -12,7 +12,11 @@ from pathlib import Path
 import wordfreq
 
 
+# Read database path from environment, fall back to the default container path.
 DB_PATH = Path(os.environ.get("DB_FILE", "/data/ainotepad_vocab.db"))
+
+# Accepts only letters (A-Z, a-z), French accented characters (à-ÿ range),
+# apostrophes (straight and curly), and hyphens — no digits or special chars.
 WORD_RE = re.compile(r"^[A-Za-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u00ff'\u2019\\-]+$")
 
 
@@ -28,6 +32,8 @@ def create_schema(conn: sqlite3.Connection) -> None:
             lang TEXT NOT NULL DEFAULT 'en' CHECK(lang IN ('en','fr'))
         );
 
+        -- Composite primary key: each row represents a unique word pair (prev → next).
+        -- There is no single surrogate key — the pair itself IS the identity.
         CREATE TABLE IF NOT EXISTS bigrams(
             prev_id INTEGER NOT NULL,
             next_id INTEGER NOT NULL,
@@ -40,9 +46,11 @@ def create_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_words_word ON words(word);
         CREATE INDEX IF NOT EXISTS idx_words_lang ON words(lang);
         CREATE INDEX IF NOT EXISTS idx_words_freq ON words(freq DESC);
+        -- Composite index speeds up language-filtered frequency lookups.
         CREATE INDEX IF NOT EXISTS idx_words_lang_freq ON words(lang, freq DESC);
         CREATE INDEX IF NOT EXISTS idx_bigrams_prev_id ON bigrams(prev_id);
         CREATE INDEX IF NOT EXISTS idx_bigrams_next_id ON bigrams(next_id);
+        -- Used by the suggestion query: given a previous word, rank next words by freq.
         CREATE INDEX IF NOT EXISTS idx_bigrams_prev_freq ON bigrams(prev_id, freq DESC);
         CREATE INDEX IF NOT EXISTS idx_bigrams_freq ON bigrams(freq DESC);
         """
@@ -82,7 +90,10 @@ def seed_from_wordfreq(conn: sqlite3.Connection) -> bool:
             if not WORD_RE.fullmatch(word):
                 continue
 
+            # Convert Zipf frequency score (0–8 scale) to a stable integer for storage.
             freq = int(max(1.0, wordfreq.zipf_frequency(word, lang) * 100))
+            # When a word appears in both languages, keep the higher frequency
+            # and assign it to whichever language scored higher.
             if freq > freq_by_word.get(word, 0):
                 freq_by_word[word] = freq
                 lang_by_word[word] = lang
@@ -93,7 +104,7 @@ def seed_from_wordfreq(conn: sqlite3.Connection) -> bool:
 
     rows = [(w, freq_by_word[w], lang_by_word[w]) for w in freq_by_word]
     cur = conn.cursor()
-    chunk = 2000
+    chunk = 2000  # Insert in batches to avoid hitting SQLite variable limits.
     for i in range(0, len(rows), chunk):
         cur.executemany(
             """
@@ -115,8 +126,10 @@ def main() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
+    # WAL mode allows concurrent reads while a write is in progress.
     cur.execute("PRAGMA journal_mode=WAL;")
     cur.fetchone()
+    # Foreign key enforcement is off by default in SQLite — enable it explicitly.
     cur.execute("PRAGMA foreign_keys=ON;")
 
     create_schema(conn)
