@@ -18,6 +18,18 @@ Docker is used for the Ollama model server and the shared SQLite vocabulary in `
 powershell -ExecutionPolicy Bypass -File .\run.ps1
 ```
 
+If you want to run `.\run.ps1` directly without `-ExecutionPolicy Bypass`, allow scripts once for your user:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+To remove that permission later (restore the default for your user):
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser Undefined
+```
+
 ## Run on Linux (native GUI)
 
 ```bash
@@ -30,7 +42,7 @@ chmod +x ./run.sh
 ### Windows
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\cleanup.ps1
+.\cleanup.ps1
 ```
 
 ### Linux

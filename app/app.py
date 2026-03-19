@@ -150,8 +150,8 @@ DB_TOP_WORDS = int(os.environ.get("DB_TOP_WORDS", "150000"))
 # Maximum bigrams loaded from SQLite into memory.
 DB_TOP_BIGRAMS = int(os.environ.get("DB_TOP_BIGRAMS", "80000"))
 
-# Show model errors in the status bar when enabled.
-SHOW_MODEL_ERRORS_IN_STATUS = os.environ.get("SHOW_MODEL_ERRORS", "1") == "1"
+# Show model errors in the status bar when enabled (default off).
+SHOW_MODEL_ERRORS_IN_STATUS = os.environ.get("SHOW_MODEL_ERRORS", "0") == "1"
 
 # ================= THEME (VS CODE DARK-ish) =================
 BG = "#0b0f14"
