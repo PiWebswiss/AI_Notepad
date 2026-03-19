@@ -1,22 +1,25 @@
 #!/usr/bin/env pwsh
+# Stop immediately on any error instead of silently continuing.
 $ErrorActionPreference = "Stop"
 
 # Cleanup script for Windows host.
-# This script removes running containers/volumes and optionally local artifacts.
+# Removes Docker containers/volumes and optionally local artifacts (venv, DB, image, shortcut).
 
-# Stop containers and remove compose volumes (including Ollama model data volume).
+# Resolve project root from the script's own location.
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
+
 Write-Host "Stopping containers and removing volumes (incl. Ollama data)..."
+# -v also removes named volumes declared in docker-compose.yml (Ollama model cache).
 docker compose down -v
 
-$venvPath = Join-Path $root ".venv"
-$dataPath = Join-Path $root "data"
+$venvPath    = Join-Path $root ".venv"
+$dataPath    = Join-Path $root "data"
 $ollamaImage = "ollama/ollama:latest"
 
 function Confirm-Remove($path, $description) {
   if (-not (Test-Path $path)) { return }
-  # Ask before deleting slower-to-rebuild assets.
+  # Prompt before deleting assets that are slow to rebuild (e.g. venv).
   $answer = Read-Host "Remove $description at '$path'? (y/N)"
   if ($answer -match '^[Yy]$') {
     Write-Host "Removing $description..."
@@ -26,10 +29,14 @@ function Confirm-Remove($path, $description) {
   }
 }
 
-# Keep this optional, because rebuilding venv can be slow.
+# The venv takes time to recreate (pip install), so ask before removing.
 Confirm-Remove $venvPath "virtual env"
 
-# Always remove project data directory (requested cleanup policy).
+# Remove the pip-install sentinel so the next run re-installs dependencies.
+$sentinel = Join-Path $root ".deps-installed"
+if (Test-Path $sentinel) { Remove-Item -Force $sentinel }
+
+# The data directory holds the SQLite vocab DB — always removed on cleanup.
 if (Test-Path $dataPath) {
   Write-Host "Removing data directory (DB) at '$dataPath'..."
   Remove-Item -Recurse -Force $dataPath
@@ -37,13 +44,26 @@ if (Test-Path $dataPath) {
   Write-Host "Data directory not found; nothing to remove."
 }
 
-# Optionally remove Ollama image to reclaim disk space.
+# The Ollama image is several GB; ask before removing to avoid a long re-download.
 $removeImg = Read-Host "Remove Ollama image '$ollamaImage'? (y/N)"
 if ($removeImg -match '^[Yy]$') {
   Write-Host "Removing Ollama image..."
+  # Suppress output: rmi prints nothing useful on success, and errors are non-fatal here.
   docker rmi $ollamaImage 2>$null | Out-Null
 } else {
   Write-Host "Keeping Ollama image."
+}
+
+# Remove the desktop shortcut created by run.ps1 on first launch.
+$shortcutFile = Join-Path ([Environment]::GetFolderPath("Desktop")) "AI Notepad.lnk"
+if (Test-Path $shortcutFile) {
+  Write-Host "Removing desktop shortcut..."
+  Remove-Item -Force $shortcutFile
+}
+# Also remove the generated icon file (converted from icon.png by run.ps1).
+$iconIco = Join-Path $root "images\icon.ico"
+if (Test-Path $iconIco) {
+  Remove-Item -Force $iconIco
 }
 
 Write-Host "Cleanup complete."

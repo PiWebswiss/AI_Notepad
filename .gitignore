@@ -1,3 +1,4 @@
+.deps-installed
 app_readme_en.md
 app_readme_fr.md
 dossier.md
@@ -7,3 +8,6 @@ data
 app/__pycache__
 README_PSEUDOCODE.md
 python.ipynb
+generate_docx.py
+prompts_and_problems.md
+prompts_and_problems.docx
