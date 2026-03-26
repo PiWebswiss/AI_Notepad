@@ -12,3 +12,5 @@ generate_docx.py
 prompts_and_problems.md
 prompts_and_problems.docx
 AI Notepad.docx
+.claude
+app_readme_en.pdf

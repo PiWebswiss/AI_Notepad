@@ -414,6 +414,15 @@ def clean_llm_text(text: str) -> str:
         t = "\n".join(lines[1:-1]).strip()
 
     t = re.sub(r"^\s*(assistant|response|output)\s*:\s*", "", t, flags=re.IGNORECASE)
+
+    # Strip common correction preambles that models add before the corrected text,
+    # e.g. "Here is the corrected text:\n\n..." or "Corrected version:\n\n...".
+    # We remove only the header line(s) and keep everything after the first blank line.
+    t = re.sub(
+        r"(?i)^(here[''s]* *(is +)?the +corrected +\w*|corrected +(text|version|paragraph)|correction)[^\n]*\n+",
+        "", t.strip()
+    ).strip()
+
     if len(t) >= 2 and t[0] == t[-1] and t[0] in ("'", '"'):
         if t.count(t[0]) == 2:
             t = t[1:-1].strip()
