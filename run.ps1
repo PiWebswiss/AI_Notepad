@@ -115,6 +115,7 @@ if (-not (Test-Path $sentinel) -or (Get-Item $reqFile).LastWriteTime -gt (Get-It
   # Upgrade pip itself first to avoid warnings about an outdated installer.
   & $python -m pip install --upgrade pip
   & $python -m pip install -r $reqFile
+  if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
   # Record the install time so subsequent runs skip this step.
   New-Item -ItemType File -Force -Path $sentinel | Out-Null
 } else {
