@@ -17,46 +17,12 @@ Set-Location $root
 # Directory containing the Python application source files.
 $appDir = Join-Path $root "app"
 
-# Offer to create a desktop shortcut on first run (skipped on subsequent runs).
+# Ask about desktop shortcut on first run (actual creation happens at the end, after setup succeeds).
 $shortcutFile = Join-Path ([Environment]::GetFolderPath("Desktop")) "AI Notepad.lnk"
+$createShortcut = $false
 if (-not (Test-Path $shortcutFile)) {
     $ans = Read-Host "Create a desktop shortcut for AI Notepad? (y/N)"
-    if ($ans -match '^[Yy]$') {
-        try {
-            # Paths to the source PNG and the generated ICO used by the shortcut.
-            $iconPng = Join-Path $root "images\icon.png"
-            $iconIco = Join-Path $root "images\icon.ico"
-            if (Test-Path $iconPng) {
-                # System.Drawing is built into Windows — no extra package needed.
-                Add-Type -AssemblyName System.Drawing
-                $bmp = [System.Drawing.Bitmap]::new($iconPng)
-                # GetHicon() converts the bitmap to a Windows icon handle.
-                $ico = [System.Drawing.Icon]::FromHandle($bmp.GetHicon())
-                $fs  = [System.IO.File]::Create($iconIco)
-                $ico.Save($fs); $fs.Close()
-                $ico.Dispose(); $bmp.Dispose()
-            }
-            # Prefer PowerShell 7 (pwsh); fall back to Windows PowerShell 5 if not installed.
-            $ps = if (Get-Command pwsh -ErrorAction SilentlyContinue) { (Get-Command pwsh).Source } else { (Get-Command powershell).Source }
-            # Use the WScript.Shell COM object — the standard way to create .lnk shortcuts on Windows.
-            $shell = New-Object -ComObject WScript.Shell
-            $shortcut = $shell.CreateShortcut($shortcutFile)
-            # Configure the shortcut to launch this script via PowerShell in a minimized window.
-            $shortcut.TargetPath = $ps
-            $shortcut.Arguments = "-ExecutionPolicy Bypass -WindowStyle Minimized -File `"$(Join-Path $root 'run.ps1')`""
-            $shortcut.WorkingDirectory = $root
-            $shortcut.Description = "Launch AI Notepad"
-            # 7 = minimized window: terminal stays in taskbar, not blocking the screen.
-            $shortcut.WindowStyle = 7
-            # Apply the custom icon if the PNG-to-ICO conversion succeeded above.
-            if (Test-Path $iconIco) { $shortcut.IconLocation = $iconIco }
-            # Write the .lnk file to the desktop.
-            $shortcut.Save()
-            Write-Host "Desktop shortcut created."
-        } catch {
-            Write-Warning "Could not create shortcut: $_"
-        }
-    }
+    if ($ans -match '^[Yy]$') { $createShortcut = $true }
 }
 
 # Read OLLAMA_MODEL from the environment or from the .env file.
@@ -71,25 +37,15 @@ if (-not $model -and (Test-Path ".env")) {
 if ($model) { $env:OLLAMA_MODEL = $model }
 
 Write-Host "Starting Ollama container..."
-# -d starts the container in the background (detached mode).
-docker compose up -d ollama
+# --wait blocks until the healthcheck passes, so Ollama is ready to accept commands.
+docker compose up -d --wait ollama
 
 # Pull the model if it is not already cached inside the Ollama container.
-# We retry the list command up to 20 times because Ollama needs a few seconds to boot.
 if ($model) {
   Write-Host "Ensuring model '$model' is available in Ollama..."
-  $names = @()
-  for ($i = 0; $i -lt 20; $i++) {
-    try {
-      $list = docker compose exec -T ollama ollama list 2>$null
-      if ($LASTEXITCODE -eq 0 -and $list) {
-        # Skip header line, then extract the first whitespace-delimited column (model name).
-        $names = $list -split "`n" | Select-Object -Skip 1 | ForEach-Object { ($_ -split "\s+")[0] }
-        break
-      }
-    } catch { }
-    Start-Sleep -Seconds 1
-  }
+  $list = docker compose exec -T ollama ollama list 2>$null
+  # Skip header line, then extract the first whitespace-delimited column (model name).
+  $names = $list -split "`n" | Select-Object -Skip 1 | ForEach-Object { ($_ -split "\s+")[0] }
   if ($names -notcontains $model) {
     Write-Host "Pulling $model into Ollama..."
     docker compose exec -T ollama ollama pull $model
@@ -139,6 +95,44 @@ New-Item -ItemType Directory -Force -Path (Split-Path $env:DB_FILE) | Out-Null
 # seed_db.py is idempotent: it only populates the DB if tables are empty.
 Write-Host "Seeding vocab DB at $env:DB_FILE (runs only if needed)..."
 & $python (Join-Path $appDir "seed_db.py")
+
+# Create the desktop shortcut now that setup completed successfully.
+if ($createShortcut) {
+    try {
+        # Paths to the source PNG and the generated ICO used by the shortcut.
+        $iconPng = Join-Path $root "images\icon.png"
+        $iconIco = Join-Path $root "images\icon.ico"
+        if (Test-Path $iconPng) {
+            # System.Drawing is built into Windows — no extra package needed.
+            Add-Type -AssemblyName System.Drawing
+            $bmp = [System.Drawing.Bitmap]::new($iconPng)
+            # GetHicon() converts the bitmap to a Windows icon handle.
+            $ico = [System.Drawing.Icon]::FromHandle($bmp.GetHicon())
+            $fs  = [System.IO.File]::Create($iconIco)
+            $ico.Save($fs); $fs.Close()
+            $ico.Dispose(); $bmp.Dispose()
+        }
+        # Prefer PowerShell 7 (pwsh); fall back to Windows PowerShell 5 if not installed.
+        $ps = if (Get-Command pwsh -ErrorAction SilentlyContinue) { (Get-Command pwsh).Source } else { (Get-Command powershell).Source }
+        # Use the WScript.Shell COM object — the standard way to create .lnk shortcuts on Windows.
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($shortcutFile)
+        # Configure the shortcut to launch this script via PowerShell in a minimized window.
+        $shortcut.TargetPath = $ps
+        $shortcut.Arguments = "-ExecutionPolicy Bypass -WindowStyle Minimized -File `"$(Join-Path $root 'run.ps1')`""
+        $shortcut.WorkingDirectory = $root
+        $shortcut.Description = "Launch AI Notepad"
+        # 7 = minimized window: terminal stays in taskbar, not blocking the screen.
+        $shortcut.WindowStyle = 7
+        # Apply the custom icon if the PNG-to-ICO conversion succeeded above.
+        if (Test-Path $iconIco) { $shortcut.IconLocation = $iconIco }
+        # Write the .lnk file to the desktop.
+        $shortcut.Save()
+        Write-Host "Desktop shortcut created."
+    } catch {
+        Write-Warning "Could not create shortcut: $_"
+    }
+}
 
 Write-Host "Starting AI Notepad locally..."
 & $python (Join-Path $appDir "ui.py")

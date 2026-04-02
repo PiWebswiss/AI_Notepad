@@ -54,4 +54,12 @@ else
   echo "Keeping Ollama image."
 fi
 
+# Remove the desktop shortcut created by run.sh on first launch.
+DESKTOP_DIR="${XDG_DESKTOP_DIR:-$HOME/Desktop}"
+SHORTCUT_FILE="$DESKTOP_DIR/ai-notepad.desktop"
+if [ -f "$SHORTCUT_FILE" ]; then
+  echo "Removing desktop shortcut..."
+  rm -f "$SHORTCUT_FILE"
+fi
+
 echo "Cleanup complete."

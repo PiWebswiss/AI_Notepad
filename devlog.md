@@ -86,3 +86,13 @@ L'application tourne nativement sur le PC (via `run.ps1` ou `run.sh`). Seul Olla
 ### Correction du commentaire .env
 
 Le commentaire dans `.env` disait "override the default model chosen in app/app.py". Le modele est defini uniquement dans `.env`, il n'y a pas de valeur par defaut dans le code. Commentaire corrige.
+
+### Remplacement de la boucle de retry par un healthcheck Docker
+
+Les scripts de lancement utilisaient une boucle qui reessayait `ollama list` jusqu'a 20 fois (1 seconde entre chaque tentative) pour attendre que le serveur Ollama soit pret. Cette approche a ete remplacee par un healthcheck Docker natif.
+
+**Modifications :**
+
+- **docker-compose.yml** : ajout d'un healthcheck sur le service `ollama` qui ping `http://localhost:11434/` toutes les 2 secondes.
+- **run.ps1** : la boucle `for ($i = 0; $i -lt 20; ...)` remplacee par `docker compose up -d --wait ollama`, qui attend que le healthcheck passe avant de continuer.
+- **run.sh** : meme remplacement de la boucle `for i in $(seq 1 20)` par `--wait`.
