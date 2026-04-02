@@ -774,13 +774,11 @@ class AINotepad(tk.Tk):
             self._report_model_error(e)
             return False
 
-        # Handle both dict (ollama < 0.2) and Pydantic model (ollama >= 0.2) responses.
+        # Extract model names from the Pydantic response object.
         names = set()
-        models_list = data.get("models", []) if isinstance(data, dict) else (data.models or [])
-        for m in models_list:
-            name = (m.get("name") or m.get("model")) if isinstance(m, dict) else m.model
-            if name:
-                names.add(name)
+        for m in (data.models or []):
+            if m.model:
+                names.add(m.model)
 
         if MODEL not in names:
             self._model_available = False
@@ -809,13 +807,8 @@ class AINotepad(tk.Tk):
             raise
 
     def _do_chat(self, client, messages, options):
-        """Call client.chat with think=False to disable qwen3 reasoning blocks.
-        Falls back silently if the installed ollama library is too old to support it."""
-        try:
-            return client.chat(model=MODEL, messages=messages, options=options, think=False)
-        except TypeError:
-            # Older ollama library versions don't have the think= parameter.
-            return client.chat(model=MODEL, messages=messages, options=options)
+        """Call client.chat with think=False to disable qwen3 reasoning blocks."""
+        return client.chat(model=MODEL, messages=messages, options=options, think=False)
 
     def clear_ai(self):
         """Hide popups/ghost and reset correction bookkeeping."""

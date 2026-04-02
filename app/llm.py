@@ -1,4 +1,4 @@
-﻿"""Ollama client helpers and response compatibility adapters."""
+﻿"""Ollama client helpers."""
 
 import ollama
 
@@ -13,25 +13,13 @@ def get_ollama_client(host: str, timeout: float):
     client = _CLIENT_CACHE.get(key)
     if client is not None:
         return client
-    try:
-        # Pass timeout if the installed ollama version supports it.
-        client = ollama.Client(host=host, timeout=timeout)
-    except TypeError:
-        # Older versions of the ollama package do not accept a timeout parameter.
-        client = ollama.Client(host=host)
+    client = ollama.Client(host=host, timeout=timeout)
     _CLIENT_CACHE[key] = client
     return client
 
 
 def extract_chat_content(resp) -> str:
-    """Extract text content from both legacy dict and pydantic response formats."""
+    """Extract text content from an Ollama chat response (Pydantic model)."""
     if resp is None:
         return ""
-    # Legacy format: response is a plain dict (older ollama versions).
-    if isinstance(resp, dict):
-        return (resp.get("message") or {}).get("content") or ""
-    # Pydantic format: response is an object with a .message.content attribute.
-    try:
-        return resp.message.content or ""
-    except AttributeError:
-        return ""
+    return resp.message.content or ""
