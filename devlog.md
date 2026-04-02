@@ -96,3 +96,31 @@ Les scripts de lancement utilisaient une boucle qui reessayait `ollama list` jus
 - **docker-compose.yml** : ajout d'un healthcheck sur le service `ollama` qui ping `http://localhost:11434/` toutes les 2 secondes.
 - **run.ps1** : la boucle `for ($i = 0; $i -lt 20; ...)` remplacee par `docker compose up -d --wait ollama`, qui attend que le healthcheck passe avant de continuer.
 - **run.sh** : meme remplacement de la boucle `for i in $(seq 1 20)` par `--wait`.
+
+### Raccourci bureau deplace en fin de script
+
+La creation du raccourci bureau (question + creation) etait faite au debut du script de lancement. Si l'installation plantait ensuite, l'utilisateur se retrouvait avec un raccourci vers une app cassee. La question est maintenant posee au debut, mais le raccourci n'est cree qu'a la fin, une fois que toute l'installation s'est terminee avec succes.
+
+**Fichiers modifies :** `run.ps1`, `run.sh`.
+
+### Correction du bug "stale" sur la correction automatique
+
+Les corrections etaient systematiquement rejetees comme "stale" car le `doc_version` changeait a chaque touche, meme si le texte du bloc n'avait pas change. Le collage (paste) incrementait aussi le compteur plusieurs fois.
+
+**Correction :** le check de fraicheur compare maintenant le texte reel du bloc au lieu du `doc_version`. Si le texte n'a pas change depuis la requete, la correction est acceptee.
+
+**Fichier modifie :** `app/ui.py` — `request_block_fix()`.
+
+### Ajout d'un indicateur de chargement (spinner)
+
+Ajout d'une animation rotative (`| / - \`) dans la barre de statut pendant que l'IA travaille sur une correction. L'animation demarre quand la requete est envoyee et s'arrete quand la reponse arrive.
+
+**Fichier modifie :** `app/ui.py` — nouvelles methodes `_start_spinner()` et `_stop_spinner()`, utilisees dans `request_block_fix()` et `correct_document()`.
+
+### Utilisation de split_into_chunks pour la correction auto
+
+La correction automatique pendant la frappe (`request_block_fix`) envoyait le paragraphe entier en un seul bloc au modele. Pour les longs textes colles sans lignes vides, cela pouvait depasser la capacite du modele (4096 tokens de contexte).
+
+La correction auto utilise maintenant `split_into_chunks()` pour decouper les longs blocs en morceaux de 1600 caracteres, comme le fait deja le bouton Correct All. Les morceaux sont corriges un par un puis reassembles avant d'etre affiches dans un seul popup.
+
+La constante `MAX_FIX_CHARS` (ancienne limite de troncature) a ete supprimee car le decoupage en chunks rend la troncature inutile.

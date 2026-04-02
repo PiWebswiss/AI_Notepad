@@ -156,9 +156,7 @@ NEXT_GHOST_DEBOUNCE_MS = 520
 # --- Context sizes ---
 # Maximum context size used for prompts.
 MAX_CONTEXT_CHARS = 1800
-# Maximum block size used for correction requests.
-MAX_FIX_CHARS = 9000
-# Chunk size used by whole document correction.
+# Chunk size used when splitting long text for correction.
 DOC_CHUNK_CHARS = 1600
 
 # --- Vocab learning window ---
@@ -267,6 +265,8 @@ class AINotepad(tk.Tk):
         self._after_model_error = None   # Status bar error display timer.
         self._after_status_reset = None  # Transient status message reset timer.
         self._status_override = False    # True while a transient status message is displayed.
+        self._spinner_after = None       # Timer for the loading animation.
+        self._spinner_index = 0          # Current frame of the animation.
         # Lock that serialises LLM calls so Ollama is never hit by concurrent requests.
         self._llm_lock = threading.Lock()
 
@@ -321,6 +321,7 @@ class AINotepad(tk.Tk):
         self.ghost_mode = "none"  # none | next | word
 
         self._build_ui()
+        self._build_spinner()
         self._bind_keys()
         self.text.focus_set()
 
@@ -712,6 +713,43 @@ class AINotepad(tk.Tk):
         if self._after_status_reset:
             self.after_cancel(self._after_status_reset)
         self._after_status_reset = self.after(ms, self._clear_status_override)
+
+    def _build_spinner(self):
+        """Create a hidden spinner in the toolbar, between buttons and status."""
+        size = 46
+        self._spin_size = size
+        self._spin_canvas = tk.Canvas(
+            self.status.master, width=size, height=size,
+            bg=PANEL, highlightthickness=0,
+        )
+        self._spin_angle = 0
+
+    def _start_spinner(self):
+        """Show a spinning arc in the center of the editor."""
+        self._spin_angle = 0
+        # Show spinner between the buttons and the status label.
+        self._spin_canvas.pack(side="right", padx=(12, 12), before=self.status)
+        def tick():
+            s = self._spin_size
+            pad = 4
+            self._spin_canvas.delete("all")
+            # Draw the arc (270 degrees, leaving a gap).
+            self._spin_canvas.create_arc(
+                pad, pad, s - pad, s - pad,
+                start=self._spin_angle, extent=270,
+                style="arc", outline=FG, width=3,
+            )
+            self._spin_angle = (self._spin_angle + 25) % 360
+            self._spinner_after = self.after(40, tick)
+        tick()
+
+    def _stop_spinner(self):
+        """Hide the spinning wheel and restore normal status text."""
+        if self._spinner_after:
+            self.after_cancel(self._spinner_after)
+            self._spinner_after = None
+        self._spin_canvas.pack_forget()
+        self.status.config(text=self._status_base_text())
 
     def _refresh_status_base(self):
         if self._status_override:
@@ -1452,10 +1490,10 @@ class AINotepad(tk.Tk):
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
         pad = 12
-        w = min(720, int(sw * 0.55))
-        h = min(420, int(sh * 0.35))
-        w = max(min(420, sw - pad * 2), w)
-        h = max(min(220, sh - pad * 2), h)
+        w = min(900, int(sw * 0.6))
+        h = min(550, int(sh * 0.45))
+        w = max(min(500, sw - pad * 2), w)
+        h = max(min(300, sh - pad * 2), h)
         return w, h
 
     def _clamp_to_screen(self, x, y, w, h, pad=10):
@@ -1645,29 +1683,38 @@ class AINotepad(tk.Tk):
             self.fix_corrected = ""
             return
 
-        if len(block) > MAX_FIX_CHARS:
-            block = block[-MAX_FIX_CHARS:]
-            start = f"{end}-{len(block)}c"
-
         lang = self.lang
-        req_version = self.doc_version
         req_id = self._fix_req = self._fix_req + 1
         original_snapshot = block
+        self._start_spinner()
 
         def worker():
-            corrected = original_snapshot
-            try:
-                corrected = self.ask_block_fix_plain(original_snapshot, lang)
-                corrected = post_fix_spacing(corrected)
-                corrected = post_fix_capitalization(corrected)
-            except Exception:
-                corrected = original_snapshot
-
-            corrected = clean_llm_text(corrected)
+            # Split long blocks into chunks so each stays within the model's context.
+            chunks = split_into_chunks(original_snapshot, DOC_CHUNK_CHARS)
+            out_chunks = []
+            for ch in chunks:
+                try:
+                    fixed = self.ask_block_fix_plain(ch, lang)
+                    fixed = clean_llm_text(fixed)
+                    fixed = post_fix_spacing(fixed)
+                    fixed = post_fix_capitalization(fixed)
+                    # If the model returned garbage, keep the original chunk unchanged.
+                    if not fixed.strip() or self._is_bad_fix(ch, fixed):
+                        out_chunks.append(ch)
+                    else:
+                        out_chunks.append(fixed)
+                except Exception:
+                    out_chunks.append(ch)
+            corrected = "".join(out_chunks)
 
             def ui():
-                # Ignore stale response if document changed meanwhile.
-                if req_id != self._fix_req or req_version != self.doc_version:
+                self._stop_spinner()
+                # Ignore stale response only if a newer request was made for the same block.
+                if req_id != self._fix_req:
+                    return
+                # Check if the block text has actually changed since the request was made.
+                current_block = self.text.get(start, end)
+                if current_block != original_snapshot:
                     return
 
                 if is_no_correction(corrected) or corrected.strip() == original_snapshot.strip():
@@ -1685,7 +1732,7 @@ class AINotepad(tk.Tk):
                 self.fix_start, self.fix_end = start, end
                 self.fix_original = original_snapshot
                 self.fix_corrected = corrected
-                self.fix_version = req_version
+                self.fix_version = self.doc_version
 
                 self.underline_diffs(start, original_snapshot, self.fix_corrected)
                 self.show_fix_popup(self.fix_corrected)
@@ -1703,6 +1750,7 @@ class AINotepad(tk.Tk):
         if not self._ensure_model_available():
             return
         self._correct_all_running = True
+        self._start_spinner()
         if self._after_fix:
             self.after_cancel(self._after_fix)
             self._after_fix = None
@@ -1779,9 +1827,8 @@ class AINotepad(tk.Tk):
                 self.after(0, ui)
             finally:
                 def done():
+                    self._stop_spinner()
                     self._correct_all_running = False
-                    if not SHOW_MODEL_ERRORS_IN_STATUS:
-                        self.status.config(text=self._status_base_text())
                 self.after(0, done)
 
         threading.Thread(target=worker, daemon=True).start()
