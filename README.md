@@ -11,14 +11,12 @@ Docker is used for the Ollama model server and the shared SQLite vocabulary in `
 4. Press **TAB** to apply the correction, or **ESC** to dismiss it.
 5. Use **Correct All** (or `Ctrl+Shift+Enter`) to correct the entire document at once — the same popup appears for review before anything is changed.
 
-> Example: typing `hello there` → popup shows `Hello there` → press TAB to apply.
-
 ## Prerequisites
 
 - Docker Desktop
 - Python 3 + pip on host (dependencies install into `.venv`)
 
-## Run on Windows (native GUI)
+## Run on Windows
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\run.ps1
@@ -37,21 +35,12 @@ Answer `y` to create an `AI Notepad` icon on your desktop — future launches ar
 Set the model in one place only: `.env` (single line).
 
 ```env
-OLLAMA_MODEL=qwen3:0.6b
+OLLAMA_MODEL=qwen3:1.7b
 ```
 
 If `OLLAMA_MODEL` is missing or empty, the app will report an error and Ollama calls will not run.
 
-### Tested models
-
-| Model | Works |
-|-------|-------|
-| `qwen3:0.6b` | ✓ (recommended — smallest, fast) |
-| `qwen3:1.7b` | ✓ |
-| `gemma3:1b` | ✓ |
-
-> **qwen3 note:** qwen3 models output `<think>…</think>` reasoning blocks before answering. These blocks consume tokens from the generation budget, so `OLLAMA_NUM_PREDICT_MAX` defaults to `1500` (instead of `240`) to ensure qwen3 has enough budget to finish thinking and then emit the corrected text. The app strips `<think>` blocks automatically — no configuration needed.
-
+ 
 If you want to run `.\run.ps1` directly without `-ExecutionPolicy Bypass`, allow scripts once for your user:
 
 ```powershell

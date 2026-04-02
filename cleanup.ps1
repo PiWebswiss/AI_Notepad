@@ -13,8 +13,10 @@ Write-Host "Stopping containers and removing volumes (incl. Ollama data)..."
 # -v also removes named volumes declared in docker-compose.yml (Ollama model cache).
 docker compose down -v
 
-$venvPath    = Join-Path $root ".venv"
-$dataPath    = Join-Path $root "data"
+# Paths to local artifacts that may need cleaning.
+$venvPath = Join-Path $root ".venv"
+$dataPath = Join-Path $root "data"
+# Docker image used by the Ollama service.
 $ollamaImage = "ollama/ollama:latest"
 
 function Confirm-Remove($path, $description) {
@@ -50,7 +52,8 @@ if ($removeImg -match '^[Yy]$') {
   Write-Host "Removing Ollama image..."
   # Suppress output: rmi prints nothing useful on success, and errors are non-fatal here.
   docker rmi $ollamaImage 2>$null | Out-Null
-} else {
+}
+else {
   Write-Host "Keeping Ollama image."
 }
 
@@ -60,9 +63,10 @@ if (Test-Path $shortcutFile) {
   Write-Host "Removing desktop shortcut..."
   Remove-Item -Force $shortcutFile
 }
-# Also remove the generated icon file (converted from icon.png by run.ps1).
+# Also remove the generated .ico file (converted from icon.png by run.ps1).
 $iconIco = Join-Path $root "images\icon.ico"
 if (Test-Path $iconIco) {
+  Write-Host "Removing generated icon..."
   Remove-Item -Force $iconIco
 }
 

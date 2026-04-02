@@ -1,4 +1,4 @@
-# AI notepad
+﻿# AI notepad
 # - Fast LOCAL word suggestions (popup + grey ghost suffix)
 # - Optional SQLite learning (persist words + bigrams across runs)
 # - LLM used for
@@ -24,12 +24,26 @@ import re
 import threading
 import time
 import difflib
-import unicodedata
 import sqlite3
 from collections import Counter
 import tkinter as tk
 from tkinter import filedialog, messagebox
-import ollama  
+
+from db import detect_lang, is_lang_word
+from llm import extract_chat_content as _extract_chat_content
+from llm import get_ollama_client as _shared_ollama_client
+from suggestions import rank_local_candidates
+from text_utils import (
+    NO_CORRECTION_TEXT,
+    clean_llm_text,
+    is_no_correction,
+    looks_like_chatbot_output,
+    post_fix_capitalization,
+    post_fix_spacing,
+    split_into_chunks,
+    strip_accents,
+    uniq_keep_order,
+)
 
 # File reading guide
 # - Config section defines runtime knobs and defaults.
@@ -143,9 +157,9 @@ NEXT_GHOST_DEBOUNCE_MS = 520
 # Maximum context size used for prompts.
 MAX_CONTEXT_CHARS = 1800
 # Maximum block size used for correction requests.
-MAX_FIX_CHARS     = 9000
+MAX_FIX_CHARS = 9000
 # Chunk size used by whole document correction.
-DOC_CHUNK_CHARS   = 1600
+DOC_CHUNK_CHARS = 1600
 
 # --- Vocab learning window ---
 # Delay before rebuilding local vocabulary from typed text.
@@ -178,7 +192,7 @@ NEXT_GHOST_CONTEXT_CHARS = 1200
 
 # Insert a space after accepting a suggestion when needed.
 AUTO_SPACE_AFTER_ACCEPT = True
-PUNCT_CHARS = set(",.;:!?)]}\"'’”")
+PUNCT_CHARS = set(",.;:!?)]}\"'â€™â€")
 # Remove space before punctuation when enabled.
 NO_SPACE_BEFORE_PUNCT = True
 
@@ -198,315 +212,32 @@ DB_TOP_BIGRAMS = int(os.environ.get("DB_TOP_BIGRAMS", "80000"))
 SHOW_MODEL_ERRORS_IN_STATUS = os.environ.get("SHOW_MODEL_ERRORS", "0") == "1"
 
 # ================= THEME (VS CODE DARK-ish) =================
-BG = "#0b0f14"
-PANEL = "#0f192e"
-FG = "#e9eef5"
-MUTED = "#a3b2c6"
-SEL_BG = "#1f3554"
-BORDER = "#22324a"
-GHOST = "#7a8697"
-BAD_BG = "#2a1620"
-POPUP_BG = "#0f1828"
-POPUP_HEADER = "#0b1423"
-POPUP_BORDER = "#22324a"
-POPUP_SHADOW = "#05080e"
+# Color palette inspired by VS Code's dark theme.
+BG = "#0b0f14"           # Main editor background.
+PANEL = "#0f192e"        # Toolbar and status bar background.
+FG = "#e9eef5"           # Default text foreground.
+MUTED = "#a3b2c6"        # Dimmed / secondary text (hints, status).
+SEL_BG = "#1f3554"       # Text selection highlight.
+BORDER = "#22324a"       # Border lines between panels.
+GHOST = "#7a8697"        # Ghost (inline suggestion) text color.
+BAD_BG = "#2a1620"       # Background for underlined correction spans.
+POPUP_BG = "#0f1828"     # Popup body background.
+POPUP_HEADER = "#0b1423" # Popup header bar background.
+POPUP_BORDER = "#22324a" # Popup border color.
+POPUP_SHADOW = "#05080e" # Outer shadow / padding area of popups.
 
+# Font used for toolbar labels and hints.
 FONT_UI = ("Segoe UI Semibold", 11)
+# Font used in the main text editor area.
 FONT_EDIT = ("Cascadia Code", 14)
 
 # ================= UTILITIES =================
-WORD_CHAR_RE = re.compile(r"[A-Za-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u00ff'’\-]")
-
-def strip_accents(s: str) -> str:
-    """Return accent-stripped representation used for fuzzy matching/indexing."""
-    # NFD decomposition separates base letters from their diacritic marks.
-    # Filtering out "Mn" (non-spacing marks) then removes the accents.
-    return "".join(ch for ch in unicodedata.normalize("NFD", s) if unicodedata.category(ch) != "Mn")
-
-LANG_SETS_CACHE = None  # Module-level cache; populated once on first call to load_lang_sets().
-
-def load_lang_sets():
-    """Load language word sets from normalized DB table words(word, lang)."""
-    global LANG_SETS_CACHE
-    if LANG_SETS_CACHE is not None:
-        return LANG_SETS_CACHE
-
-    lang_sets = {"en": set(), "fr": set()}
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        cur = conn.cursor()
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='words';")
-        has_words = cur.fetchone() is not None
-        if has_words:
-            # Language metadata is stored directly in words.lang.
-            for word, lang in cur.execute("SELECT word, lang FROM words WHERE lang IN ('en','fr');"):
-                w = (word or "").strip().lower()
-                l = (lang or "").strip().lower()
-                if w and l in ("en", "fr"):
-                    lang_sets[l].add(w)
-        conn.close()
-    except Exception:
-        lang_sets = {"en": set(), "fr": set()}
-
-    LANG_SETS_CACHE = lang_sets
-    return LANG_SETS_CACHE
-
-def detect_lang(text: str) -> str:
-    """Detect language (fr/en) using DB hits + heuristics."""
-    text = text or ""
-    tokens = re.findall(r"[A-Za-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u00ff'\u2019]+", text.lower())
-    if not tokens:
-        return "en"
-
-    en_score = 0
-    fr_score = 0
-
-    lang_sets = load_lang_sets()
-    if lang_sets["en"] or lang_sets["fr"]:
-        for w in tokens:
-            if w in lang_sets["en"]:
-                en_score += 2
-            if w in lang_sets["fr"]:
-                fr_score += 2
-
-    en_score += sum(1 for w in tokens if w in EN_STOPWORDS)
-    fr_score += sum(1 for w in tokens if w in FR_STOPWORDS)
-
-    for w in tokens:
-        if "'" in w or "\u2019" in w:
-            for pref in FR_APOST_PREFIXES:
-                if w.startswith(pref):
-                    fr_score += 2
-                    break
-
-    accent_hits = len(ACCENT_RE.findall(text))
-    if accent_hits:
-        fr_score += accent_hits * 2
-
-    if fr_score == en_score:
-        if accent_hits > 0:
-            return "fr"
-        return "en"
-    return "fr" if fr_score > en_score else "en"
-
-def split_into_chunks(text: str, max_chars: int):
-    """Split text into chunks that do not exceed max_chars, keeping blank-line separators."""
-    text = text or ""
-    if len(text) <= max_chars:
-        return [text]
-
-    # Split on double newlines (paragraph breaks) and keep the separators
-    # so the original paragraph structure can be reconstructed after processing.
-    parts = re.split(r"(\n\s*\n)", text)  # keep blank-line separator
-    chunks, cur = [], ""
-
-    for p in parts:
-        if len(cur) + len(p) <= max_chars:
-
-            cur += p
-        else:
-            if cur:
-                chunks.append(cur)
-
-            cur = p
-
-    if cur:
-        chunks.append(cur)
-
-    out = []
-    for ch in chunks:
-        if len(ch) <= max_chars:
-            out.append(ch)
-        else:
-            for i in range(0, len(ch), max_chars):
-                out.append(ch[i:i + max_chars])
-
-    return out
-
-# Detects chat-style headers in model output (e.g. "assistant: ...") which indicate the model
-# replied as a chatbot rather than returning corrected text directly.
-CHATBOT_ROLE_RE = re.compile(r"(?m)^(assistant|user|system)\s*:")
-ACCENT_RE = re.compile(r"[àâäæçéèêëîïôœùûüÿ]", re.IGNORECASE)
-
-# French apostrophe contractions (both straight ' and curly \u2019 variants).
-FR_APOST_PREFIXES = (
-    "l'", "d'", "j'", "t'", "m'", "s'", "c'", "n'", "qu'", "jusqu'",
-    "l\u2019", "d\u2019", "j\u2019", "t\u2019", "m\u2019", "s\u2019",
-    "c\u2019", "n\u2019", "qu\u2019", "jusqu\u2019",
-)
-
-# Common French words for language scoring (not in the DB).
-FR_STOPWORDS = {
-    "le","la","les","un","une","des","du","de","et","est","que","qui","pour","dans","pas","plus",
-    "au","aux","sur","par","ce","ces","se","sa","son","ses","ne","ni","mais","ou","avec","sans",
-    "en","a","etre","avoir","je","tu","il","elle","nous","vous","ils","elles","mon","ton","notre",
-    "votre","leur","mes","tes","nos","vos","leurs","ceci","cela","c","l","d","j","t","m","s","n","qu","y",
-}
-
-# Common English words for language scoring (not in the DB).
-EN_STOPWORDS = {
-    "the","and","is","are","to","of","in","that","this","for","with","on","as","at","be","was","were",
-    "by","or","not","it","its","from","a","an","i","you","he","she","we","they","them","his","her","our",
-    "your","their","but","if","then","so","do","does","did","have","has","had","can","could","should",
-}
-NO_CORRECTION_TEXT = "No correction needed"
-
-_OLLAMA_CLIENT = None  # Singleton Ollama client; created lazily on first use.
+# Matches a single "word character": letters (including accented Latin), apostrophes, and hyphens.
+WORD_CHAR_RE = re.compile(r"[A-Za-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u00ff’’\-]")
 
 def get_ollama_client():
-    """Create and cache a single Ollama client instance."""
-    global _OLLAMA_CLIENT
-    if _OLLAMA_CLIENT is None:
-        try:
-            _OLLAMA_CLIENT = ollama.Client(host=OLLAMA_HOST, timeout=OLLAMA_TIMEOUT)
-        except TypeError:
-            _OLLAMA_CLIENT = ollama.Client(host=OLLAMA_HOST)
-    return _OLLAMA_CLIENT
-
-def _extract_chat_content(resp) -> str:
-    """Extract text content from an ollama chat response.
-
-    Handles both the legacy dict format (ollama < 0.2) and the current
-    Pydantic model format (ollama >= 0.2) so the app works regardless of
-    which library version is installed.
-    """
-    if resp is None:
-        return ""
-    if isinstance(resp, dict):
-        return (resp.get("message") or {}).get("content") or ""
-    # Pydantic model returned by ollama >= 0.2
-    try:
-        return resp.message.content or ""
-    except AttributeError:
-        return ""
-
-def uniq_keep_order(items):
-    """Remove duplicates while preserving first-seen order."""
-    seen = set()
-    out = []
-    for item in items:
-        if item is None:
-            continue
-        key = item.lower() if isinstance(item, str) else item
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(item)
-    return out
-
-def clean_llm_text(text: str) -> str:
-    """Normalize model output and strip common wrapper artifacts."""
-    if not text:
-        return ""
-    t = text.replace("\r\n", "\n").replace("\r", "\n").strip()
-    if not t:
-        return ""
-
-    # Strip complete <think>...</think> reasoning blocks (qwen3 and similar models).
-    t = re.sub(r"<think>.*?</think>", "", t, flags=re.DOTALL).strip()
-    # Strip truncated <think> blocks (response cut off before </think> due to token budget).
-    t = re.sub(r"<think>.*", "", t, flags=re.DOTALL).strip()
-    if not t:
-        return ""
-
-    lines = t.splitlines()
-    if len(lines) >= 2 and lines[0].startswith("```") and lines[-1].startswith("```"):
-        t = "\n".join(lines[1:-1]).strip()
-
-    t = re.sub(r"^\s*(assistant|response|output)\s*:\s*", "", t, flags=re.IGNORECASE)
-
-    # Strip common correction preambles that models add before the corrected text,
-    # e.g. "Here is the corrected text:\n\n..." or "Corrected version:\n\n...".
-    # We remove only the header line(s) and keep everything after the first blank line.
-    t = re.sub(
-        r"(?i)^(here[''s]* *(is +)?the +corrected +\w*|corrected +(text|version|paragraph)|correction)[^\n]*\n+",
-        "", t.strip()
-    ).strip()
-
-    if len(t) >= 2 and t[0] == t[-1] and t[0] in ("'", '"'):
-        if t.count(t[0]) == 2:
-            t = t[1:-1].strip()
-
-    return t
-
-def is_no_correction(text: str) -> bool:
-    """Check for explicit 'no correction' response from the model."""
-    t = (text or "").strip().lower()
-    return t in (
-        NO_CORRECTION_TEXT.lower(),
-        "aucune correction necessaire",
-        "aucune correction n\u00e9cessaire",
-    )
-
-def looks_like_chatbot_output(text: str) -> bool:
-    """Detect generic assistant/meta replies that are invalid as direct edits."""
-    t = (text or "").strip()
-    if not t:
-        return False
-    low = t.lower()
-    if low.startswith((
-        "as an ai",
-        "as a language model",
-        "i am an ai",
-        "i'm an ai",
-        "i cannot",
-        "i can't",
-        "i am unable",
-        "i'm sorry",
-        "sorry",
-    )):
-        return True
-    if "here's the corrected" in low or "here is the corrected" in low:
-        return True
-    if "corrected text:" in low or "correction:" in low:
-        return True
-    if CHATBOT_ROLE_RE.search(t):
-        return True
-    return False
-
-def post_fix_spacing(text: str) -> str:
-    """Apply lightweight punctuation spacing cleanup after correction."""
-    if not text:
-        return text
-    t = text.replace("\r\n", "\n").replace("\r", "\n")
-    t = re.sub(r"[ \t]+([,.;:!?])", r"\1", t)
-    t = re.sub(r"[ \t]+([\)\]\}])", r"\1", t)
-    t = re.sub(r"[ \t]{2,}", " ", t)
-    return t
-
-def post_fix_capitalization(text: str) -> str:
-    """Capitalize the first letter of each sentence.
-    Handles sentence boundaries after . ! ? and at the very start of the text.
-    Applied as a safety net when the model misses obvious capitalization errors."""
-    if not text:
-        return text
-    # Capitalize after sentence-ending punctuation followed by whitespace.
-    result = re.sub(r'([.!?][ \u00a0]+)([a-zà-öø-ÿ])',
-                    lambda m: m.group(1) + m.group(2).upper(), text)
-    # Capitalize the very first character if it is a lowercase letter.
-    if result and result[0].islower():
-        result = result[0].upper() + result[1:]
-    return result
-
-def is_lang_word(word: str, lang: str) -> bool:
-    """Filter candidate words by detected language and configuration flags."""
-    w = (word or "").strip().lower()
-    if not w:
-        return False
-    lang_sets = load_lang_sets()
-    if not lang_sets["en"] and not lang_sets["fr"]:
-        return True
-    in_en = w in lang_sets["en"]
-    in_fr = w in lang_sets["fr"]
-    if in_en or in_fr:
-        return (lang == "en" and in_en) or (lang == "fr" and in_fr)
-    if not ALLOW_UNKNOWN_WORDS:
-        return False
-    if lang == "fr" and ACCENT_RE.search(w):
-        return True
-    if lang == "en" and ACCENT_RE.search(w):
-        return False
-    return True
+    """Return a shared Ollama client configured from app constants."""
+    return _shared_ollama_client(OLLAMA_HOST, OLLAMA_TIMEOUT)
 
 # ================= APP =================
 # Declare `AINotepad` as the main object that coordinates related state and methods.
@@ -524,35 +255,41 @@ class AINotepad(tk.Tk):
         self.minsize(900, 580)
         self.configure(bg=BG)
 
+        # Path to the currently open file (None for unsaved new documents).
         self.filepath = None
 
-        # Debounce handles
-        self._after_word = None
-        self._after_fix = None
-        self._after_vocab = None
-        self._after_next = None
-        self._after_model_error = None
-        self._after_status_reset = None
-        self._status_override = False
+        # --- Debounce handles ---
+        # Each handle stores a pending `after()` timer ID so it can be cancelled on the next keystroke.
+        self._after_word = None          # Word suggestion timer.
+        self._after_fix = None           # Block correction timer.
+        self._after_vocab = None         # Vocabulary rebuild timer.
+        self._after_next = None          # Ghost continuation timer.
+        self._after_model_error = None   # Status bar error display timer.
+        self._after_status_reset = None  # Transient status message reset timer.
+        self._status_override = False    # True while a transient status message is displayed.
+        # Lock that serialises LLM calls so Ollama is never hit by concurrent requests.
         self._llm_lock = threading.Lock()
 
-        # Request ids + doc version to drop stale results
-        self._word_req = 0
-        self._fix_req = 0
-        self._ghost_req = 0
-        self.doc_version = 0
-        self._model_available = None
-        self._model_checked_at = 0.0
+        # --- Request ids + doc version to drop stale results ---
+        # Each async request gets an incrementing ID. When the callback fires, it compares
+        # its ID against the current one; if they differ, the result is discarded.
+        self._word_req = 0     # Latest word suggestion request ID.
+        self._fix_req = 0      # Latest block correction request ID.
+        self._ghost_req = 0    # Latest ghost continuation request ID.
+        self.doc_version = 0   # Incremented on every keystroke; callbacks use it to detect edits.
+        self._model_available = None   # Cached model availability (True/False/None).
+        self._model_checked_at = 0.0   # Timestamp of last model availability check.
 
-        # Language
-        self.lang = "en"
+        # --- Language ---
+        self.lang = "en"  # Detected language of the current text ("en" or "fr").
 
-        # Vocab + bigrams
-        self.vocab = Counter()
-        self.bigram = Counter()
-        self._last_vocab_tail = ""
-        self.vocab_norm = {}
-        self.vocab_by_prefix = {}
+        # --- Vocab + bigrams ---
+        # In-memory word frequency and bigram tables used for local suggestion scoring.
+        self.vocab = Counter()          # word -> frequency count.
+        self.bigram = Counter()         # (prev_word, next_word) -> co-occurrence count.
+        self._last_vocab_tail = ""      # Last text window used for vocab rebuild (avoids redundant work).
+        self.vocab_norm = {}            # word -> accent-stripped form (cache).
+        self.vocab_by_prefix = {}       # prefix -> set of words sharing that prefix.
 
         # SQLite persistence (read-only: vocab loaded at startup, no writes at runtime)
         self.db = None
@@ -560,27 +297,27 @@ class AINotepad(tk.Tk):
             self._db_open_and_load()
         self._rebuild_vocab_index()
 
-        # Word suggestion state
-        self.word_span = None      # (start_index, end_index, full_word)
-        self.word_frag = ""
-        self.word_items = []
-        self.word_idx = 0
+        # --- Word suggestion state ---
+        self.word_span = None      # (start_index, end_index, full_word) of the word being completed.
+        self.word_frag = ""        # Left fragment typed so far (used to compute ghost suffix).
+        self.word_items = []       # Current list of ranked word candidates.
+        self.word_idx = 0          # Index of the currently highlighted candidate.
         # Cache avoids repeat LLM calls for the same (language, fragment, previous word) key.
-        self.word_cache = {}  # (lang, frag.lower(), prev.lower()) -> suggestions
+        self.word_cache = {}       # (lang, frag.lower(), prev.lower()) -> suggestions.
 
-        # Fix state
-        self.fix_start = None
-        self.fix_end = None
-        self.fix_original = ""
-        self.fix_corrected = ""
-        self.fix_version = -1
-        self._correct_all_running = False
+        # --- Fix (correction) state ---
+        self.fix_start = None      # Editor index where the corrected block starts.
+        self.fix_end = None        # Editor index where the corrected block ends.
+        self.fix_original = ""     # Original text snapshot (used to verify nothing changed before apply).
+        self.fix_corrected = ""    # Corrected text proposed by the model.
+        self.fix_version = -1      # Doc version at the time of the correction request.
+        self._correct_all_running = False  # True while a whole-document correction is in progress.
 
         # Ghost (single label)
         # ghost_mode tracks what kind of inline suggestion is displayed:
-        #   "none"  – nothing shown
-        #   "word"  – suffix of the top word suggestion
-        #   "next"  – Copilot-style sentence continuation
+        #   "none"  â€“ nothing shown
+        #   "word"  â€“ suffix of the top word suggestion
+        #   "next"  â€“ Copilot-style sentence continuation
         self.ghost_mode = "none"  # none | next | word
 
         self._build_ui()
@@ -669,17 +406,21 @@ class AINotepad(tk.Tk):
             b.pack(side="left", padx=6)
             return b
 
+        # Toolbar buttons for file operations and manual whole-document correction.
         btn("New", self.new_file)
         btn("Open", self.open_file)
         btn("Save", self.save_file)
-        btn("Correct All", self.correct_document)  # <- ONLY THIS ONE
+        btn("Correct All", self.correct_document)
 
+        # Status bar label (right-aligned): shows model name and detected language.
         self.status = tk.Label(top, text=self._status_base_text(), bg=PANEL, fg=MUTED, font=("Segoe UI", 13))
         self.status.pack(side="right", padx=12)
 
+        # --- Main editor area ---
         wrap = tk.Frame(self, bg=BG)
         wrap.pack(side="top", fill="both", expand=True, padx=14, pady=12)
 
+        # Thin border frame around the text widget.
         border = tk.Frame(wrap, bg=BORDER)
         border.pack(fill="both", expand=True)
 
@@ -704,17 +445,20 @@ class AINotepad(tk.Tk):
         )
         self.text.pack(side="left", fill="both", expand=True)
 
+        # Vertical scrollbar linked to the text widget.
         scroll = tk.Scrollbar(inner, command=self.text.yview)
         scroll.pack(side="right", fill="y")
         self.text.config(yscrollcommand=scroll.set)
 
+        # Tag used to underline text spans where the AI found errors.
         self.text.tag_configure("ai_bad", underline=True, background=BAD_BG)
 
         # Ghost text (inline)
         self.ghost = tk.Label(self.text, text="", bg=BG, fg=GHOST, font=FONT_EDIT)
         self.ghost.place_forget()
 
-        # WORD POPUP (inside text widget)
+        # --- WORD POPUP (inside text widget) ---
+        # Small dropdown that appears under the cursor with ranked word candidates.
         self.word_popup = tk.Frame(self.text, bg=PANEL, highlightthickness=1, highlightbackground=BORDER)
         self.word_popup.place_forget()
         self.word_btns = []
@@ -732,11 +476,13 @@ class AINotepad(tk.Tk):
             b.pack(fill="x")
             self.word_btns.append(b)
 
-        # FIX preview popup (attached to app, scrollable)
+        # --- FIX PREVIEW POPUP (attached to app, scrollable) ---
+        # Floating window that shows the AI-corrected text for the current block.
+        # The user can press TAB to accept or ESC to dismiss.
         self.fix_popup = tk.Toplevel(self)
-        self.fix_popup.withdraw()
-        self.fix_popup.overrideredirect(True)
-        self.fix_popup.transient(self)
+        self.fix_popup.withdraw()        # Hidden until a correction is ready.
+        self.fix_popup.overrideredirect(True)  # No title bar or window decorations.
+        self.fix_popup.transient(self)    # Always on top of the main window.
         self.fix_popup.configure(bg=POPUP_SHADOW)
         try:
             self.fix_popup.attributes("-topmost", False)
@@ -821,6 +567,8 @@ class AINotepad(tk.Tk):
         self.fix_view.config(yscrollcommand=self.fix_scroll.set)
         self.fix_view.config(state="disabled")
 
+        # --- Bottom hint bar ---
+        # Shows keyboard shortcuts and the current word suggestion selection.
         bottom = tk.Frame(self, bg=PANEL, highlightthickness=1, highlightbackground=BORDER)
         bottom.pack(side="bottom", fill="x")
 
@@ -834,31 +582,37 @@ class AINotepad(tk.Tk):
     # ---------------- Keys ----------------
     def _bind_keys(self):
         """Wire global and editor shortcuts to their handlers."""
+        # Close confirmation before quitting.
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
+        # --- File shortcuts ---
         self.bind("<Control-n>", lambda e: self.new_file())
         self.bind("<Control-o>", lambda e: self.open_file())
         self.bind("<Control-s>", lambda e: self.save_file())
         self.bind("<Control-S>", lambda e: self.save_as())
 
-        # Only Correct ALL shortcut
-        self.bind("<Control-Shift-Return>", lambda e: self.correct_document())
-        self.bind("<Control-space>", lambda e: self.on_ctrl_space())
+        # --- AI shortcuts ---
+        self.bind("<Control-Shift-Return>", lambda e: self.correct_document())  # Correct whole document.
+        self.bind("<Control-space>", lambda e: self.on_ctrl_space())            # Cycle / force word suggestion.
 
-        self.text.bind("<KeyPress-Tab>", self.on_tab, add=False)
+        # --- Editor key bindings ---
+        self.text.bind("<KeyPress-Tab>", self.on_tab, add=False)     # TAB: accept fix, word, or ghost.
         self.text.bind("<Escape>", lambda e: self.hide_fix_popup() or self.hide_word_popup() or self.hide_ghost(), add=True)
-        self.text.bind("<Up>", self.on_up, add=True)
-        self.text.bind("<Down>", self.on_down, add=True)
+        self.text.bind("<Up>", self.on_up, add=True)                 # Navigate word popup up.
+        self.text.bind("<Down>", self.on_down, add=True)             # Navigate word popup down.
 
+        # Main typing hook: fires on every key release and mouse click.
         self.text.bind("<KeyRelease>", self.on_key_release)
         self.text.bind("<ButtonRelease-1>", self.on_key_release)
 
+        # --- Reposition overlays on resize/scroll ---
         self.bind("<Configure>", lambda e: self.after(0, self._reposition_fix_popup), add=True)
         self.text.bind("<Configure>", lambda e: self.after(0, self._reposition_fix_popup), add=True)
         self.text.bind("<MouseWheel>", lambda e: self.after(0, self._reposition_fix_popup) or self.after(0, self.reposition_word_popup) or self.after(0, self.update_ghost_position), add=True)
         self.text.bind("<Button-4>", lambda e: self.after(0, self._reposition_fix_popup) or self.after(0, self.reposition_word_popup) or self.after(0, self.update_ghost_position), add=True)
         self.text.bind("<Button-5>", lambda e: self.after(0, self._reposition_fix_popup) or self.after(0, self.reposition_word_popup) or self.after(0, self.update_ghost_position), add=True)
 
+        # Hide all overlays when the window loses focus or is minimized.
         self.bind("<FocusOut>", lambda e: self.hide_fix_popup() or self.hide_word_popup() or self.hide_ghost(), add=True)
         self.bind("<Unmap>", lambda e: self.hide_fix_popup() or self.hide_word_popup() or self.hide_ghost(), add=True)
 
@@ -1094,7 +848,7 @@ class AINotepad(tk.Tk):
         """Return token preceding current word fragment for bigram scoring."""
         insert = self.text.index("insert")
         before = self.text.get("1.0", insert)[-240:]
-        tokens = re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ'’-]+", before)
+        tokens = re.findall(r"[A-Za-zÃ€-Ã–Ã˜-Ã¶Ã¸-Ã¿'â€™-]+", before)
         if len(tokens) < 2:
             return ""
         return tokens[-2].lower()
@@ -1407,7 +1161,7 @@ class AINotepad(tk.Tk):
             return
         self._last_vocab_tail = tail
 
-        words = re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,}", tail)
+        words = re.findall(r"[A-Za-zÃ€-Ã–Ã˜-Ã¶Ã¸-Ã¿'â€™-]{2,}", tail)
         norm = [w.lower() for w in words]
 
         wc = Counter(norm)
@@ -1427,56 +1181,22 @@ class AINotepad(tk.Tk):
 
     def local_candidates_scored(self, frag: str, prev: str, lang: str):
         """Rank local candidates using prefix, frequency, bigram, and fuzzy score."""
-        frag = (frag or "").strip()
-        if not frag:
-            return []
-
-        frag_l = frag.lower()
-        frag_n = strip_accents(frag_l)
-        if not frag_n:
-            return []
-        key = frag_n[:PREFIX_INDEX_LEN]
-        candidates = self.vocab_by_prefix.get(key, set())
-
-        scored = []
-        for w in candidates:
-            if not is_lang_word(w, lang):
-                continue
-            wn = self.vocab_norm.get(w)
-            if not wn:
-                wn = strip_accents(w)
-                self.vocab_norm[w] = wn
-            if wn.startswith(frag_n):
-                score = float(self.vocab.get(w, 1))
-                if prev:
-                    score += 8.0 * self.bigram.get((prev, w), 0)  # Bigram bonus weighted 8x to strongly prefer contextually fitting words.
-                scored.append((score, w))
-
-        use_fuzzy = ENABLE_FUZZY and len(frag_n) >= 3 and (not scored or not FUZZY_ONLY_IF_NO_PREFIX)
-        if use_fuzzy:
-            # Restrict fuzzy candidates to same first letter to reduce noisy hits.
-            first = frag_n[0]
-            for w in candidates:
-                wn = self.vocab_norm.get(w)
-                if not wn or wn[0] != first:
-                    continue
-                if not is_lang_word(w, lang):
-                    continue
-                if abs(len(wn) - len(frag_n)) > FUZZY_MAX_LEN_DIFF:
-                    continue
-                r = difflib.SequenceMatcher(a=frag_n, b=wn).ratio()
-                if r >= FUZZY_MIN_RATIO:
-                    score = 80.0 * r + 0.25 * float(self.vocab.get(w, 1))
-                    if prev:
-                        score += 10.0 * self.bigram.get((prev, w), 0)
-                    scored.append((score, w))
-
-        scored.sort(key=lambda x: (-x[0], len(x[1]), x[1]))
-        out = uniq_keep_order([w for _, w in scored])
-        out = [w for w in out if w.lower() != frag_l]
-        if frag and frag[0].isupper():
-            out = [w.capitalize() for w in out]
-        return out[:POPUP_MAX_ITEMS]
+        return rank_local_candidates(
+            frag=frag,
+            prev=prev,
+            lang=lang,
+            vocab=self.vocab,
+            bigram=self.bigram,
+            vocab_norm=self.vocab_norm,
+            vocab_by_prefix=self.vocab_by_prefix,
+            prefix_index_len=PREFIX_INDEX_LEN,
+            enable_fuzzy=ENABLE_FUZZY,
+            fuzzy_only_if_no_prefix=FUZZY_ONLY_IF_NO_PREFIX,
+            fuzzy_min_ratio=FUZZY_MIN_RATIO,
+            fuzzy_max_len_diff=FUZZY_MAX_LEN_DIFF,
+            popup_max_items=POPUP_MAX_ITEMS,
+            is_lang_word=is_lang_word,
+        )
 
     # ---------------- Typing loop ----------------
     def on_key_release(self, event=None):
@@ -2050,7 +1770,7 @@ class AINotepad(tk.Tk):
 
         chunks = split_into_chunks(original_snapshot, DOC_CHUNK_CHARS)
         total = len(chunks)
-        self.status.config(text=self._status_with_lang(f"Correcting… 0/{total}"))
+        self.status.config(text=self._status_with_lang(f"Correctingâ€¦ 0/{total}"))
 
         def worker():
             try:
@@ -2077,7 +1797,7 @@ class AINotepad(tk.Tk):
                         corrected = ch
 
                     out_chunks.append(clean_llm_text(corrected))
-                    self.after(0, lambda i=i: self.status.config(text=self._status_with_lang(f"Correcting… {i}/{total}")))
+                    self.after(0, lambda i=i: self.status.config(text=self._status_with_lang(f"Correctingâ€¦ {i}/{total}")))
 
                 # Reassemble corrected chunks in original order.
                 corrected_all = "".join(out_chunks)
@@ -2116,3 +1836,4 @@ class AINotepad(tk.Tk):
 
 if __name__ == "__main__":
     AINotepad().mainloop()
+

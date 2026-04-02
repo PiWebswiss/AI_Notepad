@@ -12,8 +12,9 @@ $ErrorActionPreference = "Stop"
 # 6) launch the desktop app
 
 # Resolve the project root from the script's own location (works regardless of working directory).
-$root   = Split-Path -Parent $MyInvocation.MyCommand.Path
+$root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
+# Directory containing the Python application source files.
 $appDir = Join-Path $root "app"
 
 # Offer to create a desktop shortcut on first run (skipped on subsequent runs).
@@ -22,6 +23,7 @@ if (-not (Test-Path $shortcutFile)) {
     $ans = Read-Host "Create a desktop shortcut for AI Notepad? (y/N)"
     if ($ans -match '^[Yy]$') {
         try {
+            # Paths to the source PNG and the generated ICO used by the shortcut.
             $iconPng = Join-Path $root "images\icon.png"
             $iconIco = Join-Path $root "images\icon.ico"
             if (Test-Path $iconPng) {
@@ -35,16 +37,20 @@ if (-not (Test-Path $shortcutFile)) {
                 $ico.Dispose(); $bmp.Dispose()
             }
             # Prefer PowerShell 7 (pwsh); fall back to Windows PowerShell 5 if not installed.
-            $ps       = if (Get-Command pwsh -ErrorAction SilentlyContinue) { (Get-Command pwsh).Source } else { (Get-Command powershell).Source }
-            $shell    = New-Object -ComObject WScript.Shell
+            $ps = if (Get-Command pwsh -ErrorAction SilentlyContinue) { (Get-Command pwsh).Source } else { (Get-Command powershell).Source }
+            # Use the WScript.Shell COM object — the standard way to create .lnk shortcuts on Windows.
+            $shell = New-Object -ComObject WScript.Shell
             $shortcut = $shell.CreateShortcut($shortcutFile)
-            $shortcut.TargetPath       = $ps
-            $shortcut.Arguments        = "-ExecutionPolicy Bypass -WindowStyle Minimized -File `"$(Join-Path $root 'run.ps1')`""
+            # Configure the shortcut to launch this script via PowerShell in a minimized window.
+            $shortcut.TargetPath = $ps
+            $shortcut.Arguments = "-ExecutionPolicy Bypass -WindowStyle Minimized -File `"$(Join-Path $root 'run.ps1')`""
             $shortcut.WorkingDirectory = $root
-            $shortcut.Description      = "Launch AI Notepad"
+            $shortcut.Description = "Launch AI Notepad"
             # 7 = minimized window: terminal stays in taskbar, not blocking the screen.
-            $shortcut.WindowStyle      = 7
+            $shortcut.WindowStyle = 7
+            # Apply the custom icon if the PNG-to-ICO conversion succeeded above.
             if (Test-Path $iconIco) { $shortcut.IconLocation = $iconIco }
+            # Write the .lnk file to the desktop.
             $shortcut.Save()
             Write-Host "Desktop shortcut created."
         } catch {
@@ -93,9 +99,10 @@ if ($model) {
 }
 
 # Create a local virtual environment to keep Python dependencies isolated from the system.
-$venvPath  = Join-Path $root ".venv"
+# Paths to the virtual environment directory and its Python executable.
+$venvPath = Join-Path $root ".venv"
 $pythonDir = Join-Path $venvPath "Scripts"
-$python    = Join-Path $pythonDir "python.exe"
+$python = Join-Path $pythonDir "python.exe"
 if (-not (Test-Path $venvPath)) {
   Write-Host "Creating venv at $venvPath"
   # Try 'python' first; fall back to 'py -3' on machines where only the launcher is in PATH.
@@ -108,7 +115,7 @@ if (-not (Test-Path $venvPath)) {
 
 # Skip pip install if requirements.txt hasn't changed since the last successful install.
 # The sentinel file is touched after a successful install to record the timestamp.
-$reqFile  = Join-Path $appDir "requirements.txt"
+$reqFile = Join-Path $appDir "requirements.txt"
 $sentinel = Join-Path $root ".deps-installed"
 if (-not (Test-Path $sentinel) -or (Get-Item $reqFile).LastWriteTime -gt (Get-Item $sentinel).LastWriteTime) {
   Write-Host "Installing Python dependencies..."
@@ -123,7 +130,7 @@ if (-not (Test-Path $sentinel) -or (Get-Item $reqFile).LastWriteTime -gt (Get-It
 }
 
 # DB_FILE tells app.py and seed_db.py where to store the SQLite vocabulary database.
-$env:DB_FILE    = Join-Path (Join-Path $root "data") "ainotepad_vocab.db"
+$env:DB_FILE = Join-Path (Join-Path $root "data") "ainotepad_vocab.db"
 # OLLAMA_HOST points the Python client at the local Ollama container (default port 11434).
 $env:OLLAMA_HOST = "http://localhost:11434"
 # Ensure the data directory exists before seed_db.py tries to create the file inside it.
