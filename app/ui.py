@@ -1,4 +1,4 @@
-﻿# AI notepad
+# AI notepad
 # - Fast LOCAL word suggestions (popup + grey ghost suffix)
 # - Optional SQLite learning (persist words + bigrams across runs)
 # - LLM used for
@@ -192,7 +192,7 @@ NEXT_GHOST_CONTEXT_CHARS = 1200
 
 # Insert a space after accepting a suggestion when needed.
 AUTO_SPACE_AFTER_ACCEPT = True
-PUNCT_CHARS = set(",.;:!?)]}\"'â€™â€")
+PUNCT_CHARS = set(",.;:!?)]}\"'’”")
 # Remove space before punctuation when enabled.
 NO_SPACE_BEFORE_PUNCT = True
 
@@ -841,7 +841,7 @@ class AINotepad(tk.Tk):
         """Return token preceding current word fragment for bigram scoring."""
         insert = self.text.index("insert")
         before = self.text.get("1.0", insert)[-240:]
-        tokens = re.findall(r"[A-Za-zÃ€-Ã–Ã˜-Ã¶Ã¸-Ã¿'â€™-]+", before)
+        tokens = re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ'’-]+", before)
         if len(tokens) < 2:
             return ""
         return tokens[-2].lower()
@@ -1154,7 +1154,7 @@ class AINotepad(tk.Tk):
             return
         self._last_vocab_tail = tail
 
-        words = re.findall(r"[A-Za-zÃ€-Ã–Ã˜-Ã¶Ã¸-Ã¿'â€™-]{2,}", tail)
+        words = re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,}", tail)
         norm = [w.lower() for w in words]
 
         wc = Counter(norm)
@@ -1589,7 +1589,7 @@ class AINotepad(tk.Tk):
             return True
         return False
 
-    def ask_block_fix_plain(self, block: str, lang: str, strong: bool = False) -> str:
+    def ask_block_fix_plain(self, block: str, lang: str) -> str:
         """Request block correction with strict 'no rewrite' constraints."""
         if lang == "fr":
             system = (
@@ -1603,8 +1603,6 @@ class AINotepad(tk.Tk):
                 "Si le texte est deja correct, reponds exactement: No correction needed. "
                 "Reponds uniquement avec le texte corrige, rien d'autre."
             )
-            if strong:
-                system += " Renvoie TOUT le texte, ligne par ligne."
         else:
             system = (
                 "You are a spell checker (not a chatbot). "
@@ -1617,8 +1615,6 @@ class AINotepad(tk.Tk):
                 "If the text is already correct, reply exactly: No correction needed. "
                 "Reply ONLY with the corrected text, nothing else."
             )
-            if strong:
-                system += " Return the FULL text, line by line."
 
         resp = self._ollama_chat(
             messages=[{"role": "system", "content": system},
@@ -1627,20 +1623,6 @@ class AINotepad(tk.Tk):
         )
         out = clean_llm_text(_extract_chat_content(resp))
         return out if out else block
-
-    def _linewise_fix(self, block: str, lang: str) -> str:
-        """Fallback correction that preserves structure line by line."""
-        lines = block.splitlines(True)
-        fixed = []
-        for ln in lines:
-            if ln.strip() == "":
-                fixed.append(ln)
-                continue
-            ending = "\n" if ln.endswith("\n") else ""
-            raw = ln[:-1] if ending else ln
-            corr = self.ask_block_fix_plain(raw, lang, strong=True)
-            fixed.append(clean_llm_text(corr) + ending)
-        return "".join(fixed)
 
     # ---------------- AI: BLOCK fix (auto preview) ----------------
     def request_block_fix(self):
@@ -1673,36 +1655,13 @@ class AINotepad(tk.Tk):
         original_snapshot = block
 
         def worker():
-            # Stage 1: standard prompt, expecting the model to return corrected text directly.
             corrected = original_snapshot
             try:
-                corrected = self.ask_block_fix_plain(original_snapshot, lang, strong=False)
+                corrected = self.ask_block_fix_plain(original_snapshot, lang)
                 corrected = post_fix_spacing(corrected)
                 corrected = post_fix_capitalization(corrected)
             except Exception:
                 corrected = original_snapshot
-
-            if self._is_bad_fix(original_snapshot, corrected):
-                # Stage 2: stricter prompt requiring full return.
-                try:
-                    corrected2 = self.ask_block_fix_plain(original_snapshot, lang, strong=True)
-                    corrected2 = post_fix_spacing(corrected2)
-                    corrected2 = post_fix_capitalization(corrected2)
-                    if not self._is_bad_fix(original_snapshot, corrected2):
-                        corrected = corrected2
-                except Exception:
-                    pass
-
-            if self._is_bad_fix(original_snapshot, corrected):
-                # Stage 3: line-by-line correction as final fallback.
-                try:
-                    corrected3 = self._linewise_fix(original_snapshot, lang)
-                    corrected3 = post_fix_spacing(corrected3)
-                    corrected3 = post_fix_capitalization(corrected3)
-                    if not self._is_bad_fix(original_snapshot, corrected3):
-                        corrected = corrected3
-                except Exception:
-                    pass
 
             corrected = clean_llm_text(corrected)
 

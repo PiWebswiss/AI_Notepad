@@ -1,7 +1,5 @@
 # Compose topology:
-# - ollama: LLM inference API service
-# - ollama_init: one-shot model pull helper
-# - app: optional utility container (the GUI app runs natively on host)
+# - ollama: LLM inference API service (the GUI app runs natively on host via run.ps1)
 services:
   ollama: # local LLM server
     image: ollama/ollama:latest
@@ -11,47 +9,6 @@ services:
     volumes:
       - ollama:/root/.ollama # persist downloaded models
     restart: unless-stopped
-
-  ollama_init: # one-shot model pull job
-    image: ollama/ollama:latest
-    container_name: AI_Notepad-ollama-init
-    profiles: ["init"] # run with: docker compose --profile init up
-    depends_on:
-      - ollama
-    environment:
-      - OLLAMA_HOST=http://ollama:11434
-      - OLLAMA_MODEL=${OLLAMA_MODEL}
-    entrypoint: ["/bin/sh", "-lc", "ollama pull $OLLAMA_MODEL"]
-    restart: "no"
-
-  app: # optional app container (GUI runs natively on host in current flow)
-    build: ./app
-    container_name: AI_Notepad
-    depends_on:
-      - ollama
-    environment:
-      DB_FILE: /data/ainotepad_vocab.db # SQLite path inside container
-      OLLAMA_HOST: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL}
-      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-180}
-      MODEL_CHECK_INTERVAL: ${MODEL_CHECK_INTERVAL:-30}
-      SHOW_MODEL_ERRORS: ${SHOW_MODEL_ERRORS:-1}
-      LLM_SERIAL: ${LLM_SERIAL:-1}
-      OLLAMA_NUM_PREDICT_MIN: ${OLLAMA_NUM_PREDICT_MIN:-200}
-      OLLAMA_NUM_PREDICT_MAX: ${OLLAMA_NUM_PREDICT_MAX:-900}
-      WORDLIST_TOP_N: ${WORDLIST_TOP_N:-120000}
-      FORCE_RESEED: ${FORCE_RESEED:-0}
-      MIN_WORDS_THRESHOLD: ${MIN_WORDS_THRESHOLD:-0}
-      ENABLE_FUZZY: ${ENABLE_FUZZY:-0}
-      DB_TOP_WORDS: ${DB_TOP_WORDS:-150000}
-      DB_TOP_BIGRAMS: ${DB_TOP_BIGRAMS:-80000}
-      USE_LLM_NEXT_GHOST: ${USE_LLM_NEXT_GHOST:-0}
-      USE_SQLITE_VOCAB: ${USE_SQLITE_VOCAB:-1}
-      ALLOW_UNKNOWN_WORDS: ${ALLOW_UNKNOWN_WORDS:-0}
-    volumes:
-      - ./data:/data # persist DB on host
-    command: ["sleep", "infinity"] # keep container available for debug tasks
-    restart: "no"
 
 volumes:
   ollama: # named volume for Ollama model data

@@ -1,4 +1,4 @@
-# Ollama Python client used by app.py to call the local Ollama server.
+# Ollama Python client used by ui.py to call the local Ollama server.
 ollama
 # wordfreq is used by seed_db.py to build the initial EN/FR vocabulary.
 wordfreq

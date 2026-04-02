@@ -38,3 +38,51 @@ Le projet installe toujours la derniere version de la librairie `ollama` via pip
 - **app/ui.py** :
   - `_ensure_model_available()` : suppression du double chemin `dict`/Pydantic pour `data.list()` et `m.model`. Utilise directement `data.models` et `m.model`.
   - `_do_chat()` : suppression du `try/except TypeError` autour de `think=False`. Appel direct avec `think=False`.
+
+### Ajout du point final dans post_fix_capitalization()
+
+La fonction `post_fix_capitalization()` dans `text_utils.py` s'assurait deja que chaque phrase commence par une majuscule. Elle verifie maintenant aussi que le texte se termine par une ponctuation de fin de phrase (`.`, `!` ou `?`), et ajoute un point si ce n'est pas le cas.
+
+### Correction du lancement (run.ps1 → ui.py)
+
+Le fichier `app.py` a ete renomme en `ui.py` lors du refactoring en modules. Le script `run.ps1` pointait encore vers `app.py`, ce qui provoquait une erreur `No such file or directory` au lancement.
+
+**Correction :** `run.ps1` ligne 144, `app.py` remplace par `ui.py`.
+
+### Correction de l'encodage UTF-8 corrompu dans ui.py
+
+Le fichier `ui.py` contenait des caracteres Unicode doublement encodes (mojibake). Les plages de caracteres accentues (`À-Ö`, `Ø-ö`, `ø-ÿ`) dans les regex et les guillemets typographiques (`'`, `"`) dans `PUNCT_CHARS` etaient illisibles par Python.
+
+**Lignes corrigees :**
+
+- **Ligne 195** (`PUNCT_CHARS`) : guillemets typographiques restaures (`'` et `"`).
+- **Ligne 844** (`get_prev_word`) : regex de tokenisation avec plages accentuees corrigees.
+- **Ligne 1157** (`rebuild_vocab`) : meme regex corrigee.
+- **Ligne 1** : suppression d'un BOM (Byte Order Mark) invisible qui causait une `SyntaxError`.
+
+### Simplification de la correction (suppression des stages 2 et 3)
+
+La correction par bloc utilisait 3 stages : prompt normal, prompt strict (`strong=True`), puis correction ligne par ligne (`_linewise_fix`). En pratique seul le stage 1 etait utile. Les stages 2 et 3 ont ete supprimes.
+
+**Modifications :**
+
+- **app/ui.py** :
+  - `ask_block_fix_plain()` : suppression du parametre `strong` et du texte additionnel "Renvoie TOUT le texte, ligne par ligne".
+  - `_linewise_fix()` : methode supprimee entierement.
+  - `request_block_fix()` : simplifie a un seul appel au lieu de 3 stages.
+  - `correct_document()` : meme simplification par chunk.
+
+### Suppression du Dockerfile et des services Docker inutilises
+
+L'application tourne nativement sur le PC (via `run.ps1` ou `run.sh`). Seul Ollama a besoin de Docker. Le Dockerfile et les services `app` et `ollama_init` n'etaient jamais utilises.
+
+**Modifications :**
+
+- **app/Dockerfile** : supprime.
+- **docker-compose.yml** : services `app` et `ollama_init` supprimes. Ne reste que le service `ollama`.
+- **run.sh** : reecrit pour suivre le meme flux que `run.ps1` (Python natif, Ollama seul dans Docker). L'ancien script utilisait X11 et un conteneur app qui n'existent plus.
+- **run.ps1**, **requirements.txt** : references a `app.py` corrigees en `ui.py`.
+
+### Correction du commentaire .env
+
+Le commentaire dans `.env` disait "override the default model chosen in app/app.py". Le modele est defini uniquement dans `.env`, il n'y a pas de valeur par defaut dans le code. Commentaire corrige.

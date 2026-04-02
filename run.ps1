@@ -60,14 +60,14 @@ if (-not (Test-Path $shortcutFile)) {
 }
 
 # Read OLLAMA_MODEL from the environment or from the .env file.
-# The default model is not set here — app/app.py is responsible for the fallback.
+# The default model is not set here — app/ui.py is responsible for the fallback.
 $model = $env:OLLAMA_MODEL
 if (-not $model -and (Test-Path ".env")) {
   # Parse the last matching line in .env to support overrides at the bottom of the file.
   $line = Get-Content ".env" | Where-Object { $_ -like "OLLAMA_MODEL=*" } | Select-Object -Last 1
   if ($line) { $model = $line.Substring("OLLAMA_MODEL=".Length) }
 }
-# Expose the resolved value so child processes (app.py) inherit it.
+# Expose the resolved value so child processes inherit it.
 if ($model) { $env:OLLAMA_MODEL = $model }
 
 Write-Host "Starting Ollama container..."
@@ -129,7 +129,7 @@ if (-not (Test-Path $sentinel) -or (Get-Item $reqFile).LastWriteTime -gt (Get-It
   Write-Host "Python dependencies already up to date, skipping install."
 }
 
-# DB_FILE tells app.py and seed_db.py where to store the SQLite vocabulary database.
+# DB_FILE tells ui.py and seed_db.py where to store the SQLite vocabulary database.
 $env:DB_FILE = Join-Path (Join-Path $root "data") "ainotepad_vocab.db"
 # OLLAMA_HOST points the Python client at the local Ollama container (default port 11434).
 $env:OLLAMA_HOST = "http://localhost:11434"
@@ -141,4 +141,4 @@ Write-Host "Seeding vocab DB at $env:DB_FILE (runs only if needed)..."
 & $python (Join-Path $appDir "seed_db.py")
 
 Write-Host "Starting AI Notepad locally..."
-& $python (Join-Path $appDir "app.py")
+& $python (Join-Path $appDir "ui.py")

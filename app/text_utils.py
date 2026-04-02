@@ -175,7 +175,7 @@ def post_fix_spacing(text: str) -> str:
 
 
 def post_fix_capitalization(text: str) -> str:
-    """Capitalize sentence starts as a post-correction safety net."""
+    """Ensure every sentence starts with a capital letter and ends with punctuation."""
     if not text:
         return text
     # After sentence-ending punctuation followed by a space, capitalize the next letter.
@@ -187,4 +187,8 @@ def post_fix_capitalization(text: str) -> str:
     # Ensure the very first character of the text is uppercase.
     if result and result[0].islower():
         result = result[0].upper() + result[1:]
+    # Ensure the text ends with sentence-ending punctuation.
+    stripped = result.rstrip()
+    if stripped and stripped[-1] not in ".!?":
+        result = stripped + "."
     return result
