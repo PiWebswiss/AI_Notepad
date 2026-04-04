@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 1030" width="700" height="1030" font-family="Arial, sans-serif">
+
+  <!-- # ===== DEFINITIONS (arrows, gradient, shadow) ===== -->
+  <defs>
+    <!-- # Arrow for connections -->
+    <marker id="arrow" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2E75B6"/>
+    </marker>
+
+    <!-- # Gradient for header -->
+    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#1B4F72"/>
+      <stop offset="100%" style="stop-color:#2E75B6"/>
+    </linearGradient>
+
+    <!-- # Shadow effect -->
+    <filter id="shadow" x="-2%" y="-2%" width="104%" height="104%">
+      <feDropShadow dx="1" dy="1" stdDeviation="2" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+
+  <!-- # ===== TITLE ===== -->
+  <rect x="150" y="10" width="400" height="45" rx="8" fill="url(#headerGrad)" filter="url(#shadow)"/>
+  <text x="350" y="39" text-anchor="middle" fill="white" font-size="16" font-weight="bold">
+    Pseudo-code global de l'application
+  </text>
+
+  <!-- # ===== STEP 1 ===== -->
+  <rect x="100" y="75" width="500" height="50" rx="25" fill="#D4E6F1" stroke="#2E75B6" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="130" y="97" font-size="12" font-weight="bold" fill="#1B4F72">1.</text>
+  <text x="150" y="97" font-size="12" fill="#1B4F72">Charger la configuration et initialiser l'application</text>
+  <line x1="350" y1="125" x2="350" y2="145" stroke="#2E75B6" marker-end="url(#arrow)"/>
+
+  <!-- # ===== STEP 2 ===== -->
+  <rect x="100" y="150" width="500" height="60" rx="6" fill="#EBF5FB" stroke="#2E75B6" filter="url(#shadow)"/>
+  <text x="130" y="175" font-size="12" font-weight="bold" fill="#1B4F72">2.</text>
+  <text x="150" y="170" font-size="11.5">Ouvrir SQLite + charger vocabulaire</text>
+  <text x="150" y="188" font-size="11.5">Construire index + interface Tkinter</text>
+  <line x1="350" y1="210" x2="350" y2="230" stroke="#2E75B6" marker-end="url(#arrow)"/>
+
+  <!-- # ===== STEP 3 (LOOP) ===== -->
+  <rect x="100" y="235" width="500" height="50" rx="6" fill="#D5F5E3" stroke="#27AE60" filter="url(#shadow)"/>
+  <text x="130" y="264" font-size="12" font-weight="bold" fill="#1E8449">3.</text>
+  <text x="150" y="264" font-size="12">Boucle d'evenements (frappes clavier)</text>
+  <line x1="350" y1="285" x2="350" y2="305" stroke="#2E75B6" marker-end="url(#arrow)"/>
+
+  <!-- # ===== STEP 4 ===== -->
+  <rect x="100" y="310" width="500" height="60" rx="6" fill="#EBF5FB" stroke="#2E75B6" filter="url(#shadow)"/>
+  <text x="130" y="335" font-size="12" font-weight="bold">4.</text>
+  <text x="150" y="330" font-size="11.5">Incrementer version et detecter langue</text>
+  <text x="150" y="348" font-size="11.5">Mettre a jour contexte</text>
+  <line x1="350" y1="370" x2="350" y2="390" stroke="#2E75B6" marker-end="url(#arrow)"/>
+
+  <!-- # ===== STEP 5 ===== -->
+  <rect x="100" y="395" width="500" height="60" rx="6" fill="#EBF5FB" stroke="#2E75B6" filter="url(#shadow)"/>
+  <text x="130" y="420" font-size="12" font-weight="bold">5.</text>
+  <text x="150" y="415" font-size="11.5">Calcul suggestions locales</text>
+  <text x="150" y="433" font-size="11.5">Afficher popup et texte fantome</text>
+  <line x1="350" y1="455" x2="350" y2="475" stroke="#2E75B6" marker-end="url(#arrow)"/>
+
+  <!-- # ===== STEP 6 (IA delayed) ===== -->
+  <rect x="100" y="480" width="500" height="60" rx="6" fill="#FEF9E7" stroke="#F39C12" filter="url(#shadow)"/>
+  <text x="130" y="505" font-size="12" font-weight="bold">6.</text>
+  <text x="150" y="500" font-size="11.5">Planifier IA (650 ms debounce)</text>
+  <text x="150" y="518" font-size="11.5">Eviter appels inutiles</text>
+  <line x1="350" y1="540" x2="350" y2="560" stroke="#2E75B6" marker-end="url(#arrow)"/>
+
+  <!-- # ===== STEP 7 ===== -->
+  <rect x="100" y="565" width="500" height="60" rx="6" fill="#FEF9E7" stroke="#F39C12" filter="url(#shadow)"/>
+  <text x="130" y="590" font-size="12" font-weight="bold">7.</text>
+  <text x="150" y="585" font-size="11.5">Appel IA (thread)</text>
+  <text x="150" y="603" font-size="11.5">Nettoyage sortie</text>
+  <line x1="350" y1="625" x2="350" y2="655" stroke="#2E75B6" marker-end="url(#arrow)"/>
+
+  <!-- # ===== STEP 8 ===== -->
+  <rect x="100" y="660" width="500" height="60" rx="6" fill="#EBF5FB" stroke="#2E75B6" filter="url(#shadow)"/>
+  <text x="130" y="685" font-size="12" font-weight="bold">8.</text>
+  <text x="150" y="680" font-size="11.5">Afficher correction</text>
+  <text x="150" y="698" font-size="11.5">Appliquer avec TAB</text>
+
+  <!-- # ===== LOOP BACK ===== -->
+  <line x1="350" y1="720" x2="350" y2="750" stroke="#27AE60"/>
+  <path d="M 350 750 L 70 750 L 70 260 L 95 260" fill="none" stroke="#27AE60" marker-end="url(#arrow)" stroke-dasharray="6,3"/>
+
+  <!-- # ===== ARROW TO STEP 9 ===== -->
+  <line x1="350" y1="750" x2="350" y2="785" stroke="#2E75B6" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- # ===== STEP 9 ===== -->
+  <rect x="100" y="785" width="500" height="50" rx="25" fill="#D4E6F1" stroke="#2E75B6" filter="url(#shadow)"/>
+  <text x="130" y="815" font-size="12" font-weight="bold">9.</text>
+  <text x="150" y="815" font-size="12">Fermeture de l'application</text>
+
+  <!-- # ===== LEGEND ===== -->
+  <rect x="100" y="860" width="500" height="140" rx="6" fill="#F8F9F9" stroke="#BDC3C7"/>
+  <text x="120" y="880" font-size="12" font-weight="bold">Legende</text>
+
+  <!-- # Legend items aligned -->
+  <rect x="120" y="895" width="20" height="14" rx="3" fill="#EBF5FB" stroke="#2E75B6"/>
+  <text x="150" y="907" font-size="11">Traitement local</text>
+
+  <rect x="120" y="920" width="20" height="14" rx="3" fill="#FEF9E7" stroke="#F39C12"/>
+  <text x="150" y="932" font-size="11">Appel IA (debounce)</text>
+
+  <rect x="120" y="945" width="20" height="14" rx="10" fill="#D5F5E3" stroke="#27AE60"/>
+  <text x="150" y="957" font-size="11">Boucle d'evenements</text>
+
+  <rect x="120" y="970" width="20" height="14" rx="10" fill="#D4E6F1" stroke="#2E75B6"/>
+  <text x="150" y="982" font-size="11">Debut / Fin</text>
+
+</svg>
