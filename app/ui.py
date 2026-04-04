@@ -799,8 +799,13 @@ class AINotepad(tk.Tk):
             raise
 
     def _do_chat(self, client, messages, options):
-        """Call client.chat with think=False to disable qwen3 reasoning blocks."""
-        return client.chat(model=MODEL, messages=messages, options=options, think=False)
+        """Call client.chat. Pass think=False for models that support it (e.g. qwen3)
+        to avoid wasting tokens on reasoning blocks. Falls back silently for models
+        that don't support the parameter (e.g. gemma4)."""
+        try:
+            return client.chat(model=MODEL, messages=messages, options=options, think=False)
+        except TypeError:
+            return client.chat(model=MODEL, messages=messages, options=options)
 
     def clear_ai(self):
         """Hide all AI overlays (popups, ghost, underlines) and reset correction state.

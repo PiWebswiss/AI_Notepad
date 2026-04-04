@@ -168,3 +168,11 @@ Les suggestions de mots viennent uniquement du vocabulaire SQLite local, pas du 
 ### Amelioration des commentaires dans ui.py
 
 Ajout de commentaires dans le style de `text_utils.py` (sections `# ---`, explication du "pourquoi") pour que le code soit comprehensible par quelqu'un qui le lit pour la premiere fois. Commentaires ajoutes sur les imports, la boucle de frappe, les guards de correction, le prompt systeme, le spinner, et les methodes de statut.
+
+### Remise du fallback think=False dans _do_chat()
+
+Le parametre `think=False` empeche les modeles "thinking" (comme qwen3) de gaspiller des tokens en blocs de reflexion `<think>...</think>`. Mais les modeles qui ne supportent pas ce parametre (comme gemma4) provoquaient une erreur silencieuse. Le `try/except TypeError` a ete remis pour gerer les deux cas : les modeles thinking recoivent `think=False`, les autres l'ignorent.
+
+### Changement de modele : gemma4:e2b
+
+Le modele a ete change de `qwen3:1.7b` a `gemma4:e2b` (5.1B parametres, architecture gemma4 de Google). Le modele qwen3 est optimise pour le raisonnement logique, pas pour la correction de texte. gemma4 est meilleur pour suivre des instructions comme "corrige ce texte".
