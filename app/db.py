@@ -15,26 +15,10 @@ _ACCENT_RE = re.compile(r"[àâäæçéèêëîïôœùûüÿ]", re.IGNORECASE)
 # Common French apostrophe prefixes (e.g. "l'homme", "d'accord").
 # Used to boost the French score during language detection.
 _FR_APOST_PREFIXES = (
-    "l'",
-    "d'",
-    "j'",
-    "t'",
-    "m'",
-    "s'",
-    "c'",
-    "n'",
-    "qu'",
-    "jusqu'",
-    "l’",
-    "d’",
-    "j’",
-    "t’",
-    "m’",
-    "s’",
-    "c’",
-    "n’",
-    "qu’",
-    "jusqu’",
+    "l\u2019", "d\u2019", "j\u2019", "t\u2019", "m\u2019",
+    "s\u2019", "c\u2019", "n\u2019", "qu\u2019", "jusqu\u2019",
+    "l’", "d’", "j’", "t’", "m’",
+    "s’", "c’", "n’", "qu’", "jusqu’",
 )
 
 # High-frequency French words used to score language likelihood.

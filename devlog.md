@@ -124,3 +124,47 @@ La correction automatique pendant la frappe (`request_block_fix`) envoyait le pa
 La correction auto utilise maintenant `split_into_chunks()` pour decouper les longs blocs en morceaux de 1600 caracteres, comme le fait deja le bouton Correct All. Les morceaux sont corriges un par un puis reassembles avant d'etre affiches dans un seul popup.
 
 La constante `MAX_FIX_CHARS` (ancienne limite de troncature) a ete supprimee car le decoupage en chunks rend la troncature inutile.
+
+### Ajout d'un spinner graphique
+
+Ajout d'une animation de chargement (arc qui tourne) dans la barre d'outils pendant que l'IA corrige le texte. Le spinner apparait a gauche du texte de statut et disparait quand la reponse arrive.
+
+**Fichier modifie :** `app/ui.py` — nouvelles methodes `_build_spinner()`, `_start_spinner()` et `_stop_spinner()` utilisant un Canvas Tkinter.
+
+### Popup de correction agrandi
+
+Le popup de correction etait trop petit pour afficher tout le texte corrige. Les dimensions maximales ont ete augmentees (720x420 -> 900x550) pour montrer plus de contenu sans scroller.
+
+### Audit complet et corrections
+
+Un audit ligne par ligne de tous les fichiers a revele 5 problemes :
+
+- **Critique : `correct_document()` cassee** — La methode utilisait encore `strong=True` et `_linewise_fix()` qui avaient ete supprimes. Corrige pour utiliser le meme flux simplifie que `request_block_fix()`.
+- **Doublons dans `_FR_APOST_PREFIXES`** (db.py) — Le tuple contenait 20 entrees au lieu de 10 : les memes prefixes etaient dupliques. Remplace par 10 variantes apostrophe droite (`'`) + 10 variantes apostrophe courbe (`\u2019`).
+- **Constante inutilisee `ALLOW_UNKNOWN_WORDS`** (ui.py) — Definie dans ui.py mais jamais utilisee (db.py la lit directement depuis l'environnement). Supprimee.
+- **Mojibake dans les commentaires** (ui.py) — Des tirets em-dash corrompus dans les commentaires ghost_mode (lignes 324-326). Remplaces par `--`.
+- **Mojibake dans une string** (ui.py) — Le caractere ellipsis dans `"Correcting..."` etait corrompu. Remplace par `...`.
+- **Schema SQL duplique** (ui.py) — Les `CREATE TABLE` et `CREATE INDEX` etaient presents dans ui.py alors que seed_db.py les cree deja. Supprimes de ui.py.
+
+### Suppression du code mort (ghost next + LLM word suggestions)
+
+Deux fonctionnalites etaient presentes dans le code mais desactivees par defaut et jamais utilisees :
+
+**Ghost continuation (Copilot-like)** — supprime :
+- Constantes : `USE_LLM_NEXT_GHOST`, `NEXT_GHOST_DEBOUNCE_MS`, `NEXT_GHOST_MAX_CHARS`, `NEXT_GHOST_MIN_INPUT`, `NEXT_GHOST_CONTEXT_CHARS`.
+- Methodes : `request_next_ghost()`, `ask_next_ghost_plain()`, `_prepare_next_ghost()`.
+- Variables : `_after_next`, `_ghost_req`.
+- Le mode ghost `"next"` n'existe plus, seul `"word"` (suffix de suggestion) reste.
+
+**LLM word suggestions** — supprime :
+- Constante : `USE_LLM_WORD_SUGGESTIONS`, `WORD_DEBOUNCE_MS`.
+- Methodes : `request_word_suggestions()`, `ask_word_suggestions_plain()`.
+- Variables : `_after_word`, `_word_req`, `word_cache`.
+- `on_ctrl_space()` simplifie pour juste cycler les suggestions locales.
+- `get_cursor_context()` supprime (jamais appelee).
+
+Les suggestions de mots viennent uniquement du vocabulaire SQLite local, pas du LLM.
+
+### Amelioration des commentaires dans ui.py
+
+Ajout de commentaires dans le style de `text_utils.py` (sections `# ---`, explication du "pourquoi") pour que le code soit comprehensible par quelqu'un qui le lit pour la premiere fois. Commentaires ajoutes sur les imports, la boucle de frappe, les guards de correction, le prompt systeme, le spinner, et les methodes de statut.
