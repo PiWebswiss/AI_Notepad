@@ -8,12 +8,12 @@ services:
       - "11434:11434" # expose Ollama API to host
     volumes:
       - ollama:/root/.ollama # persist downloaded models
-    # Health check: Ollama returns "Ollama is running" on GET /
+    # Health check: use the ollama binary (guaranteed to be in the image).
     # Docker marks the container as healthy once this succeeds.
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/"]
+      test: ["CMD", "ollama", "list"]
       interval: 2s
-      timeout: 3s
+      timeout: 5s
       retries: 10
     restart: unless-stopped
 

@@ -44,11 +44,12 @@ docker compose up -d --wait ollama
 
 # Pull the model if it is not already cached inside the Ollama container.
 if [ -n "$MODEL" ]; then
-  echo "Ensuring model '$MODEL' is available in Ollama..."
   list_out="$(docker compose exec -T ollama ollama list 2>/dev/null)"
   if ! printf "%s\n" "$list_out" | awk 'NR>1{print $1}' | grep -Fxq "$MODEL"; then
-    echo "Pulling $MODEL into Ollama..."
+    echo "Model '$MODEL' not found. Downloading..."
     docker compose exec -T ollama ollama pull "$MODEL"
+  else
+    echo "Model '$MODEL' already available."
   fi
 else
   echo "OLLAMA_MODEL not set; skipping auto model pull."

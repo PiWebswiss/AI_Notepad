@@ -42,13 +42,14 @@ docker compose up -d --wait ollama
 
 # Pull the model if it is not already cached inside the Ollama container.
 if ($model) {
-  Write-Host "Ensuring model '$model' is available in Ollama..."
   $list = docker compose exec -T ollama ollama list 2>$null
   # Skip header line, then extract the first whitespace-delimited column (model name).
   $names = $list -split "`n" | Select-Object -Skip 1 | ForEach-Object { ($_ -split "\s+")[0] }
   if ($names -notcontains $model) {
-    Write-Host "Pulling $model into Ollama..."
+    Write-Host "Model '$model' not found. Downloading..."
     docker compose exec -T ollama ollama pull $model
+  } else {
+    Write-Host "Model '$model' already available."
   }
 } else {
   Write-Host "OLLAMA_MODEL not set; skipping auto model pull."
@@ -119,11 +120,11 @@ if ($createShortcut) {
         $shortcut = $shell.CreateShortcut($shortcutFile)
         # Configure the shortcut to launch this script via PowerShell in a minimized window.
         $shortcut.TargetPath = $ps
-        $shortcut.Arguments = "-ExecutionPolicy Bypass -WindowStyle Minimized -File `"$(Join-Path $root 'run.ps1')`""
+        $shortcut.Arguments = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $root 'run.ps1')`""
         $shortcut.WorkingDirectory = $root
         $shortcut.Description = "Launch AI Notepad"
-        # 7 = minimized window: terminal stays in taskbar, not blocking the screen.
-        $shortcut.WindowStyle = 7
+        # 0 = hidden window: no console visible at all.
+        $shortcut.WindowStyle = 0
         # Apply the custom icon if the PNG-to-ICO conversion succeeded above.
         if (Test-Path $iconIco) { $shortcut.IconLocation = $iconIco }
         # Write the .lnk file to the desktop.

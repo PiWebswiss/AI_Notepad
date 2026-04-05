@@ -194,8 +194,8 @@ DB_TOP_WORDS = int(os.environ.get("DB_TOP_WORDS", "150000"))
 # Maximum bigrams loaded from SQLite into memory.
 DB_TOP_BIGRAMS = int(os.environ.get("DB_TOP_BIGRAMS", "80000"))
 
-# Show model errors in the status bar when enabled (default off).
-SHOW_MODEL_ERRORS_IN_STATUS = os.environ.get("SHOW_MODEL_ERRORS", "0") == "1"
+# Show model errors in the status bar (default on).
+SHOW_MODEL_ERRORS_IN_STATUS = os.environ.get("SHOW_MODEL_ERRORS", "1") == "1"
 
 # ================= THEME (VS CODE DARK-ish) =================
 # Color palette inspired by VS Code's dark theme.
@@ -237,7 +237,9 @@ class AINotepad(tk.Tk):
         # 4) Ignore stale async results via request id + doc version.
         super().__init__()
         self.title("AI Notepad")
-        self.geometry("1500x1000")
+        # Default window size (width x height).
+        self.geometry("1700x1000")
+        # Set the minimum allowed size.
         self.minsize(900, 580)
         self.configure(bg=BG)
 
@@ -1248,19 +1250,21 @@ class AINotepad(tk.Tk):
             return
         bbox = self.text.bbox("insert")
         if not bbox:
-            self.hide_fix_popup()
-            return
-        x, y, w0, h0 = bbox
-        x_root = self.text.winfo_rootx() + x
-        y_root = self.text.winfo_rooty() + y + h0 + 10
+            # Cursor off-screen: centre popup on the text widget instead of hiding.
+            x_root = self.text.winfo_rootx() + self.text.winfo_width() // 4
+            y_root = self.text.winfo_rooty() + 40
+        else:
+            x, y, _, h0 = bbox
+            x_root = self.text.winfo_rootx() + x
+            y_root = self.text.winfo_rooty() + y + h0 + 10
 
         pw, ph = self._fix_popup_size()
-        sw = self.winfo_screenwidth()
-        sh = self.winfo_screenheight()
         pad = 12
-        above_y = self.text.winfo_rooty() + y - ph - 10
-        if (y_root + ph + pad) > sh and above_y >= pad:
-            y_root = above_y
+        if bbox:
+            above_y = self.text.winfo_rooty() + y - ph - 10
+            sh = self.winfo_screenheight()
+            if (y_root + ph + pad) > sh and above_y >= pad:
+                y_root = above_y
         x_root, y_root = self._clamp_to_screen(x_root, y_root, pw, ph, pad=pad)
         self.fix_popup.geometry(f"{pw}x{ph}+{x_root}+{y_root}")
 
@@ -1281,8 +1285,9 @@ class AINotepad(tk.Tk):
         self.fix_view.config(state="disabled")
         self.fix_view.yview_moveto(0.0)
 
-        self._reposition_fix_popup()
         self.fix_popup.deiconify()
+        self.fix_popup.update_idletasks()
+        self._reposition_fix_popup()
         self.fix_popup.lift(self)
 
     # ---------------- Underline diffs ----------------
@@ -1454,6 +1459,7 @@ class AINotepad(tk.Tk):
             # Split long blocks into chunks so each stays within the model's context.
             chunks = split_into_chunks(original_snapshot, DOC_CHUNK_CHARS)
             out_chunks = []
+            had_error = False
             for ch in chunks:
                 try:
                     fixed = self.ask_block_fix_plain(ch, lang)
@@ -1466,6 +1472,7 @@ class AINotepad(tk.Tk):
                     else:
                         out_chunks.append(fixed)
                 except Exception:
+                    had_error = True
                     out_chunks.append(ch)
             corrected = "".join(out_chunks)
 
@@ -1477,6 +1484,14 @@ class AINotepad(tk.Tk):
                 # Check if the block text has actually changed since the request was made.
                 current_block = self.text.get(start, end)
                 if current_block != original_snapshot:
+                    return
+
+                # If the model failed, show an error instead of misleading "No correction needed".
+                if had_error and corrected.strip() == original_snapshot.strip():
+                    self.text.tag_remove("ai_bad", "1.0", "end")
+                    self.hide_fix_popup()
+                    self.fix_corrected = ""
+                    self._show_transient_status("Model error", ms=3000)
                     return
 
                 if is_no_correction(corrected) or corrected.strip() == original_snapshot.strip():
@@ -1509,6 +1524,13 @@ class AINotepad(tk.Tk):
         self.update_lang()
         if self._correct_all_running:
             return
+
+        # Don't send empty documents to the model.
+        block = self.text.get("1.0", "end-1c")
+        if not block or len(block.strip()) < 4:
+            self._show_transient_status("No text to correct")
+            return
+
         if not self._ensure_model_available():
             return
         self._correct_all_running = True
@@ -1519,11 +1541,6 @@ class AINotepad(tk.Tk):
 
         start = "1.0"
         end = "end-1c"
-
-        block = self.text.get(start, end)
-        if not block or len(block.strip()) < 4:
-            self._correct_all_running = False
-            return
 
         lang = self.lang
         req_version = self.doc_version
@@ -1537,6 +1554,7 @@ class AINotepad(tk.Tk):
         def worker():
             try:
                 out_chunks = []
+                had_error = False
                 for i, ch in enumerate(chunks, start=1):
                     if req_id != self._fix_req:
                         return
@@ -1549,6 +1567,7 @@ class AINotepad(tk.Tk):
                         if not corrected.strip() or self._is_bad_fix(ch, corrected):
                             corrected = ch
                     except Exception:
+                        had_error = True
                         corrected = ch
 
                     out_chunks.append(corrected)
@@ -1563,6 +1582,9 @@ class AINotepad(tk.Tk):
                     if not corrected_all.strip():
                         return
                     if looks_like_chatbot_output(corrected_all):
+                        return
+                    if had_error and corrected_all.strip() == original_snapshot.strip():
+                        self._show_transient_status("Model error", ms=3000)
                         return
                     if is_no_correction(corrected_all) or corrected_all.strip() == original_snapshot.strip():
                         self._show_transient_status(NO_CORRECTION_TEXT)

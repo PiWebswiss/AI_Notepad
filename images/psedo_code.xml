@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 1030" width="700" height="1030" font-family="Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 1080" width="700" height="1080" font-family="Arial, sans-serif">
 
   <!-- # ===== DEFINITIONS (arrows, gradient, shadow) ===== -->
   <defs>
@@ -28,83 +28,86 @@
   <!-- # ===== STEP 1 ===== -->
   <rect x="100" y="75" width="500" height="50" rx="25" fill="#D4E6F1" stroke="#2E75B6" stroke-width="1.5" filter="url(#shadow)"/>
   <text x="130" y="97" font-size="12" font-weight="bold" fill="#1B4F72">1.</text>
-  <text x="150" y="97" font-size="12" fill="#1B4F72">Charger la configuration et initialiser l'application</text>
+  <text x="150" y="97" font-size="12" fill="#1B4F72">DEBUT du programme</text>
   <line x1="350" y1="125" x2="350" y2="145" stroke="#2E75B6" marker-end="url(#arrow)"/>
 
   <!-- # ===== STEP 2 ===== -->
-  <rect x="100" y="150" width="500" height="60" rx="6" fill="#EBF5FB" stroke="#2E75B6" filter="url(#shadow)"/>
+  <rect x="100" y="150" width="500" height="75" rx="6" fill="#EBF5FB" stroke="#2E75B6" filter="url(#shadow)"/>
   <text x="130" y="175" font-size="12" font-weight="bold" fill="#1B4F72">2.</text>
-  <text x="150" y="170" font-size="11.5">Ouvrir SQLite + charger vocabulaire</text>
-  <text x="150" y="188" font-size="11.5">Construire index + interface Tkinter</text>
-  <line x1="350" y1="210" x2="350" y2="230" stroke="#2E75B6" marker-end="url(#arrow)"/>
+  <text x="150" y="170" font-size="11.5">OUVRIR base SQLite</text>
+  <text x="150" y="188" font-size="11.5">CHARGER vocabulaire et index en memoire</text>
+  <text x="150" y="206" font-size="11.5">CONSTRUIRE interface Tkinter</text>
+  <line x1="350" y1="225" x2="350" y2="245" stroke="#2E75B6" marker-end="url(#arrow)"/>
 
   <!-- # ===== STEP 3 (LOOP) ===== -->
-  <rect x="100" y="235" width="500" height="50" rx="6" fill="#D5F5E3" stroke="#27AE60" filter="url(#shadow)"/>
-  <text x="130" y="264" font-size="12" font-weight="bold" fill="#1E8449">3.</text>
-  <text x="150" y="264" font-size="12">Boucle d'evenements (frappes clavier)</text>
-  <line x1="350" y1="285" x2="350" y2="305" stroke="#2E75B6" marker-end="url(#arrow)"/>
+  <rect x="100" y="250" width="500" height="50" rx="6" fill="#D5F5E3" stroke="#27AE60" filter="url(#shadow)"/>
+  <text x="130" y="279" font-size="12" font-weight="bold" fill="#1E8449">3.</text>
+  <text x="150" y="279" font-size="12">TANT QUE l'application est ouverte FAIRE</text>
+  <line x1="350" y1="300" x2="350" y2="320" stroke="#2E75B6" marker-end="url(#arrow)"/>
 
   <!-- # ===== STEP 4 ===== -->
-  <rect x="100" y="310" width="500" height="60" rx="6" fill="#EBF5FB" stroke="#2E75B6" filter="url(#shadow)"/>
-  <text x="130" y="335" font-size="12" font-weight="bold">4.</text>
-  <text x="150" y="330" font-size="11.5">Incrementer version et detecter langue</text>
-  <text x="150" y="348" font-size="11.5">Mettre a jour contexte</text>
-  <line x1="350" y1="370" x2="350" y2="390" stroke="#2E75B6" marker-end="url(#arrow)"/>
+  <rect x="100" y="325" width="500" height="75" rx="6" fill="#EBF5FB" stroke="#2E75B6" filter="url(#shadow)"/>
+  <text x="130" y="350" font-size="12" font-weight="bold">4.</text>
+  <text x="150" y="345" font-size="11.5">ATTENDRE une frappe clavier</text>
+  <text x="150" y="363" font-size="11.5">DETECTER la langue du texte</text>
+  <text x="150" y="381" font-size="11.5">METTRE A JOUR le contexte</text>
+  <line x1="350" y1="400" x2="350" y2="420" stroke="#2E75B6" marker-end="url(#arrow)"/>
 
   <!-- # ===== STEP 5 ===== -->
-  <rect x="100" y="395" width="500" height="60" rx="6" fill="#EBF5FB" stroke="#2E75B6" filter="url(#shadow)"/>
-  <text x="130" y="420" font-size="12" font-weight="bold">5.</text>
-  <text x="150" y="415" font-size="11.5">Calcul suggestions locales</text>
-  <text x="150" y="433" font-size="11.5">Afficher popup et texte fantome</text>
-  <line x1="350" y1="455" x2="350" y2="475" stroke="#2E75B6" marker-end="url(#arrow)"/>
+  <rect x="100" y="425" width="500" height="75" rx="6" fill="#EBF5FB" stroke="#2E75B6" filter="url(#shadow)"/>
+  <text x="130" y="450" font-size="12" font-weight="bold">5.</text>
+  <text x="150" y="445" font-size="11.5">EXTRAIRE le mot sous le curseur</text>
+  <text x="150" y="463" font-size="11.5">SI longueur du fragment suffisante ALORS</text>
+  <text x="170" y="481" font-size="11.5">AFFICHER suggestions dans le popup</text>
+  <line x1="350" y1="500" x2="350" y2="520" stroke="#2E75B6" marker-end="url(#arrow)"/>
 
   <!-- # ===== STEP 6 (IA delayed) ===== -->
-  <rect x="100" y="480" width="500" height="60" rx="6" fill="#FEF9E7" stroke="#F39C12" filter="url(#shadow)"/>
-  <text x="130" y="505" font-size="12" font-weight="bold">6.</text>
-  <text x="150" y="500" font-size="11.5">Planifier IA (650 ms debounce)</text>
-  <text x="150" y="518" font-size="11.5">Eviter appels inutiles</text>
-  <line x1="350" y1="540" x2="350" y2="560" stroke="#2E75B6" marker-end="url(#arrow)"/>
+  <rect x="100" y="525" width="500" height="75" rx="6" fill="#FEF9E7" stroke="#F39C12" filter="url(#shadow)"/>
+  <text x="130" y="550" font-size="12" font-weight="bold">6.</text>
+  <text x="150" y="545" font-size="11.5">ATTENDRE 650 ms sans frappe</text>
+  <text x="150" y="563" font-size="11.5">SI delai ecoule ALORS</text>
+  <text x="170" y="581" font-size="11.5">ENVOYER le bloc au modele IA (thread)</text>
+  <line x1="350" y1="600" x2="350" y2="620" stroke="#2E75B6" marker-end="url(#arrow)"/>
 
   <!-- # ===== STEP 7 ===== -->
-  <rect x="100" y="565" width="500" height="60" rx="6" fill="#FEF9E7" stroke="#F39C12" filter="url(#shadow)"/>
-  <text x="130" y="590" font-size="12" font-weight="bold">7.</text>
-  <text x="150" y="585" font-size="11.5">Appel IA (thread)</text>
-  <text x="150" y="603" font-size="11.5">Nettoyage sortie</text>
-  <line x1="350" y1="625" x2="350" y2="655" stroke="#2E75B6" marker-end="url(#arrow)"/>
+  <rect x="100" y="625" width="500" height="75" rx="6" fill="#FEF9E7" stroke="#F39C12" filter="url(#shadow)"/>
+  <text x="130" y="650" font-size="12" font-weight="bold">7.</text>
+  <text x="150" y="645" font-size="11.5">RECEVOIR la reponse du modele</text>
+  <text x="150" y="663" font-size="11.5">NETTOYER la sortie</text>
+  <text x="150" y="681" font-size="11.5">SI correction invalide ALORS IGNORER</text>
+  <line x1="350" y1="700" x2="350" y2="720" stroke="#2E75B6" marker-end="url(#arrow)"/>
 
   <!-- # ===== STEP 8 ===== -->
-  <rect x="100" y="660" width="500" height="60" rx="6" fill="#EBF5FB" stroke="#2E75B6" filter="url(#shadow)"/>
-  <text x="130" y="685" font-size="12" font-weight="bold">8.</text>
-  <text x="150" y="680" font-size="11.5">Afficher correction</text>
-  <text x="150" y="698" font-size="11.5">Appliquer avec TAB</text>
+  <rect x="100" y="725" width="500" height="75" rx="6" fill="#EBF5FB" stroke="#2E75B6" filter="url(#shadow)"/>
+  <text x="130" y="750" font-size="12" font-weight="bold">8.</text>
+  <text x="150" y="745" font-size="11.5">SOULIGNER les erreurs en rouge</text>
+  <text x="150" y="763" font-size="11.5">AFFICHER le popup de correction</text>
+  <text x="150" y="781" font-size="11.5">SI utilisateur appuie sur TAB ALORS APPLIQUER</text>
 
   <!-- # ===== LOOP BACK ===== -->
-  <line x1="350" y1="720" x2="350" y2="750" stroke="#27AE60"/>
-  <path d="M 350 750 L 70 750 L 70 260 L 95 260" fill="none" stroke="#27AE60" marker-end="url(#arrow)" stroke-dasharray="6,3"/>
+  <line x1="350" y1="800" x2="350" y2="830" stroke="#27AE60"/>
+  <path d="M 350 830 L 70 830 L 70 275 L 95 275" fill="none" stroke="#27AE60" marker-end="url(#arrow)" stroke-dasharray="6,3"/>
 
   <!-- # ===== ARROW TO STEP 9 ===== -->
-  <line x1="350" y1="750" x2="350" y2="785" stroke="#2E75B6" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="350" y1="830" x2="350" y2="865" stroke="#2E75B6" stroke-width="1.5" marker-end="url(#arrow)"/>
 
   <!-- # ===== STEP 9 ===== -->
-  <rect x="100" y="785" width="500" height="50" rx="25" fill="#D4E6F1" stroke="#2E75B6" filter="url(#shadow)"/>
-  <text x="130" y="815" font-size="12" font-weight="bold">9.</text>
-  <text x="150" y="815" font-size="12">Fermeture de l'application</text>
+  <rect x="100" y="865" width="500" height="50" rx="25" fill="#D4E6F1" stroke="#2E75B6" filter="url(#shadow)"/>
+  <text x="130" y="895" font-size="12" font-weight="bold">9.</text>
+  <text x="150" y="895" font-size="12">FIN du programme</text>
 
   <!-- # ===== LEGEND ===== -->
-  <rect x="100" y="860" width="500" height="140" rx="6" fill="#F8F9F9" stroke="#BDC3C7"/>
-  <text x="120" y="880" font-size="12" font-weight="bold">Legende</text>
+  <rect x="100" y="940" width="500" height="120" rx="6" fill="#F8F9F9" stroke="#BDC3C7"/>
+  <text x="120" y="960" font-size="12" font-weight="bold">Legende</text>
 
   <!-- # Legend items aligned -->
-  <rect x="120" y="895" width="20" height="14" rx="3" fill="#EBF5FB" stroke="#2E75B6"/>
-  <text x="150" y="907" font-size="11">Traitement local</text>
+  <rect x="120" y="975" width="20" height="14" rx="3" fill="#EBF5FB" stroke="#2E75B6"/>
+  <text x="150" y="987" font-size="11">Traitement local</text>
 
-  <rect x="120" y="920" width="20" height="14" rx="3" fill="#FEF9E7" stroke="#F39C12"/>
-  <text x="150" y="932" font-size="11">Appel IA (debounce)</text>
+  <rect x="120" y="1000" width="20" height="14" rx="3" fill="#FEF9E7" stroke="#F39C12"/>
+  <text x="150" y="1012" font-size="11">Appel IA (thread)</text>
 
-  <rect x="120" y="945" width="20" height="14" rx="10" fill="#D5F5E3" stroke="#27AE60"/>
-  <text x="150" y="957" font-size="11">Boucle d'evenements</text>
-
-  <rect x="120" y="970" width="20" height="14" rx="10" fill="#D4E6F1" stroke="#2E75B6"/>
-  <text x="150" y="982" font-size="11">Debut / Fin</text>
+  <rect x="120" y="1025" width="20" height="14" rx="6" fill="#D5F5E3" stroke="#27AE60"/>
+  <text x="150" y="1037" font-size="11">Boucle principale</text>
 
 </svg>

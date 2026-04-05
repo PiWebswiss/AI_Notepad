@@ -1,7 +1,5 @@
 # Dev Log - AI Notepad
 
-## 2026-04-02
-
 ### Ajout de commentaires dans tous les fichiers
 
 Ajout de commentaires explicatifs dans tous les fichiers du projet pour faciliter la comprehension et la maintenance du code.
@@ -176,3 +174,55 @@ Le parametre `think=False` empeche les modeles "thinking" (comme qwen3) de gaspi
 ### Changement de modele : gemma4:e2b
 
 Le modele a ete change de `qwen3:1.7b` a `gemma4:e2b` (5.1B parametres, architecture gemma4 de Google). Le modele qwen3 est optimise pour le raisonnement logique, pas pour la correction de texte. gemma4 est meilleur pour suivre des instructions comme "corrige ce texte".
+
+## 2026-04-05
+
+### Correction du popup de correction qui ne s'affichait pas
+
+Le popup de correction (preview) ne s'affichait pas apres un copier-coller ou dans certains cas normaux, bien que le texte en rouge (underlines) apparaisse correctement. Deux bugs identifies :
+
+1. **Ordre d'appel incorrect dans `show_fix_popup()`** — `_reposition_fix_popup()` etait appele avant `deiconify()`. Or `_reposition_fix_popup()` verifie `winfo_viewable()` en premier et retourne immediatement si le popup n'est pas visible. Le popup etait donc rendu visible sans jamais avoir ete positionne. Correction : appeler `deiconify()` puis `update_idletasks()` puis `_reposition_fix_popup()`.
+
+2. **Curseur hors ecran = popup cache** — Dans `_reposition_fix_popup()`, si `bbox("insert")` retournait `None` (curseur hors de la zone visible, typiquement apres un collage de texte long), le popup etait cache au lieu d'etre positionne. Correction : le popup est maintenant centre sur le widget texte en fallback au lieu d'etre cache.
+
+**Fichier modifie :** `app/ui.py` — methodes `show_fix_popup()` et `_reposition_fix_popup()`.
+
+### Erreurs modele visibles au lieu de "No correction needed"
+
+Quand le modele echouait (Ollama down, timeout, etc.), l'application affichait "No correction needed" au lieu d'une erreur. Le code attrapait l'exception silencieusement et renvoyait le texte original, ce qui declenchait le message "No correction needed".
+
+Corrections :
+- Les workers de `request_block_fix()` et `correct_document()` tracent maintenant si une exception a eu lieu (`had_error`). Si oui, le status affiche "Model error" au lieu de "No correction needed".
+- `SHOW_MODEL_ERRORS_IN_STATUS` active par defaut (etait desactive).
+
+**Fichier modifie :** `app/ui.py`.
+
+### Protection "Correct All" sans texte
+
+Appuyer sur "Correct All" avec un editeur vide envoyait une requete inutile au modele. Le texte est maintenant verifie avant tout appel au modele, et le status affiche "No text to correct".
+
+**Fichier modifie :** `app/ui.py` — methode `correct_document()`.
+
+### Raccourci bureau sans console
+
+Le raccourci bureau lancait PowerShell en fenetre minimisee (`WindowStyle = 7`), ce qui laissait une icone dans la barre des taches. Change en fenetre cachee (`-WindowStyle Hidden`, `WindowStyle = 0`) pour que seule l'application Tkinter apparaisse.
+
+**Fichier modifie :** `run.ps1`.
+
+### Messages de lancement plus clairs pour le modele
+
+Le script affichait "Ensuring model..." a chaque lancement, meme quand le modele etait deja present. Remplace par deux messages distincts : "Model already available." ou "Model not found. Downloading...".
+
+**Fichiers modifies :** `run.ps1`, `run.sh`.
+
+### Healthcheck Docker corrige
+
+Le healthcheck utilisait `curl` qui n'est pas installe dans l'image Ollama. Le conteneur etait donc toujours marque `(unhealthy)`. Remplace par `ollama list` qui est garanti present dans l'image.
+
+**Fichier modifie :** `docker-compose.yml`.
+
+### Pseudo-code reecrit en francais
+
+Le diagramme SVG contenait des descriptions informelles. Reecrit en vrai pseudo-code francais avec les mots-cles standards (DEBUT, FIN, TANT QUE, SI, ALORS, ATTENDRE, ENVOYER, RECEVOIR, AFFICHER, APPLIQUER). Suppression des ":" et "+".
+
+**Fichier modifie :** `images/psedo_code.xml`.
