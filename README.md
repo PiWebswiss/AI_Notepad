@@ -18,6 +18,10 @@ Word suggestions from the local SQLite vocabulary appear as you type — press *
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (for the Ollama LLM server)
 - [Python 3 + pip](https://www.python.org/downloads/) (dependencies install into `.venv`)
 
+## GPU acceleration
+
+Ollama uses GPU acceleration automatically if an NVIDIA GPU and the NVIDIA Container Toolkit are available. On systems without a GPU, the model runs on CPU — no configuration needed.
+
 
 ## Clone my GitHub repo
 

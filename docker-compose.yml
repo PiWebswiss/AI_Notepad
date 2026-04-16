@@ -16,6 +16,15 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
+    # Use GPU if available (NVIDIA + nvidia-container-toolkit installed).
+    # On systems without a GPU, Docker ignores this block and runs on CPU.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
 volumes:
   ollama: # named volume for Ollama model data

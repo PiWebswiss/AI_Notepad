@@ -238,7 +238,7 @@ class AINotepad(tk.Tk):
         super().__init__()
         self.title("AI Notepad")
         # Default window size (width x height).
-        self.geometry("1700x1000")
+        self.geometry("1800x1000")
         # Set the minimum allowed size.
         self.minsize(900, 580)
         self.configure(bg=BG)
@@ -333,6 +333,44 @@ class AINotepad(tk.Tk):
             self.bigram.update({(a, b): int(f) for (a, b, f) in cur.fetchall()})
         except Exception:
             self.db = None
+
+    def _db_save_learned(self):
+        """Persist in-memory vocab and bigrams to SQLite so learning survives restarts.
+        Uses MAX() on conflict so existing stable frequencies are never decreased."""
+        if not self.db:
+            return
+        try:
+            cur = self.db.cursor()
+            # Save words: keep max of existing and current frequency.
+            word_rows = [(w, int(f), self.lang) for (w, f) in self.vocab.items() if f > 0]
+            cur.executemany(
+                """
+                INSERT INTO words(word, freq, lang) VALUES(?, ?, ?)
+                ON CONFLICT(word) DO UPDATE SET freq = MAX(words.freq, excluded.freq);
+                """,
+                word_rows,
+            )
+            # Build word -> id map for bigram foreign keys.
+            cur.execute("SELECT word, id FROM words;")
+            word_id = {w: i for (w, i) in cur.fetchall()}
+            # Save bigrams: skip pairs where either word was not inserted.
+            bg_rows = []
+            for (a, b), f in self.bigram.items():
+                if f <= 0:
+                    continue
+                ai, bi = word_id.get(a), word_id.get(b)
+                if ai is not None and bi is not None:
+                    bg_rows.append((ai, bi, int(f)))
+            cur.executemany(
+                """
+                INSERT INTO bigrams(prev_id, next_id, freq) VALUES(?, ?, ?)
+                ON CONFLICT(prev_id, next_id) DO UPDATE SET freq = MAX(bigrams.freq, excluded.freq);
+                """,
+                bg_rows,
+            )
+            self.db.commit()
+        except Exception:
+            pass
 
     # ---------------- UI ----------------
     def _build_ui(self):
@@ -638,6 +676,7 @@ class AINotepad(tk.Tk):
         """Close window only after unsaved-check and resource cleanup."""
         if self.confirm_discard_changes():
             try:
+                self._db_save_learned()
                 if self.db:
                     self.db.close()
             except Exception:
@@ -1125,9 +1164,7 @@ class AINotepad(tk.Tk):
         self.bigram.update(bg)
         for w in wc:
             self._index_word(w)
-
-        # DB stays read-only at runtime: new words are only learned in memory (self.vocab),
-        # not written back to SQLite. This keeps the UI fast and avoids write contention.
+        # Learned data is persisted to SQLite on app close via _db_save_learned().
 
     def local_candidates_scored(self, frag: str, prev: str, lang: str):
         """Rank local candidates using prefix, frequency, bigram, and fuzzy score."""

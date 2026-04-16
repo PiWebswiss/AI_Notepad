@@ -223,6 +223,19 @@ Le healthcheck utilisait `curl` qui n'est pas installe dans l'image Ollama. Le c
 
 ### Pseudo-code reecrit en francais
 
-Le diagramme SVG contenait des descriptions informelles. Reecrit en vrai pseudo-code francais avec les mots-cles standards (DEBUT, FIN, TANT QUE, SI, ALORS, ATTENDRE, ENVOYER, RECEVOIR, AFFICHER, APPLIQUER). Suppression des ":" et "+".
+Le diagramme SVG contenait des descriptions informelles. Reecrit en vrai pseudo-code francais avec les mots-cles standards (DEBUT, FIN, TANT QUE, SI, ALORS, ATTENDRE, ENVOYER, RECEVOIR, AFFICHER, APPLIQUER). Suppression des ":" et "+". L'etape 7 (verification de la correction) clarifiee : c'est l'application qui filtre les mauvaises sorties, pas le modele.
 
 **Fichier modifie :** `images/psedo_code.xml`.
+
+### Support GPU automatique
+
+Ajout du bloc `deploy.resources.reservations.devices` dans `docker-compose.yml` pour activer l'acceleration GPU NVIDIA automatiquement quand disponible. Sur les systemes sans GPU (ou sans nvidia-container-toolkit), Docker ignore ce bloc et tourne sur CPU. Aucune configuration manuelle requise.
+
+**Fichiers modifies :** `docker-compose.yml`, `README.md` (section "GPU acceleration").
+
+### Corrections README
+
+- Typo corrigee : `dc AI_Notepad` -> `cd AI_Notepad`.
+- Liens ajoutes vers les installateurs de Docker Desktop et Python dans la section Prerequisites.
+
+**Fichier modifie :** `README.md`.
