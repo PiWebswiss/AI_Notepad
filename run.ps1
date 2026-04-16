@@ -36,6 +36,22 @@ if (-not $model -and (Test-Path ".env")) {
 # Expose the resolved value so child processes inherit it.
 if ($model) { $env:OLLAMA_MODEL = $model }
 
+# Auto-detect NVIDIA GPU: switch the container runtime to 'nvidia' only when
+# both the host driver (nvidia-smi) and the NVIDIA container runtime are
+# registered with Docker. DOCKER_RUNTIME is consumed via ${DOCKER_RUNTIME:-runc}
+# in docker-compose.yml, so CPU-only hosts fall back to the default runtime.
+$gpuAvailable = $false
+if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
+  $runtimes = docker info --format '{{json .Runtimes}}' 2>$null
+  if ($runtimes -match 'nvidia') { $gpuAvailable = $true }
+}
+if ($gpuAvailable) {
+  $env:DOCKER_RUNTIME = "nvidia"
+  Write-Host "NVIDIA GPU detected - enabling GPU acceleration for Ollama."
+} else {
+  Write-Host "No NVIDIA GPU detected - Ollama will run on CPU."
+}
+
 Write-Host "Starting Ollama container..."
 # --wait blocks until the healthcheck passes, so Ollama is ready to accept commands.
 docker compose up -d --wait ollama

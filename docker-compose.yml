@@ -8,6 +8,10 @@ services:
       - "11434:11434" # expose Ollama API to host
     volumes:
       - ollama:/root/.ollama # persist downloaded models
+    # Runtime is swapped by run.sh / run.ps1: 'nvidia' when a GPU is detected
+    # on the host, 'runc' (default OCI runtime) otherwise. Keeping the default
+    # as 'runc' means the container starts fine on machines without a GPU.
+    runtime: ${DOCKER_RUNTIME:-runc}
     # Health check: use the ollama binary (guaranteed to be in the image).
     # Docker marks the container as healthy once this succeeds.
     healthcheck:
@@ -16,15 +20,6 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
-    # Use GPU if available (NVIDIA + nvidia-container-toolkit installed).
-    # On systems without a GPU, Docker ignores this block and runs on CPU.
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
 
 volumes:
   ollama: # named volume for Ollama model data

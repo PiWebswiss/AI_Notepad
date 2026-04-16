@@ -38,6 +38,18 @@ if [ -n "$MODEL" ]; then
   export OLLAMA_MODEL="$MODEL"
 fi
 
+# Auto-detect NVIDIA GPU: switch the container runtime to 'nvidia' only when
+# both the host driver (nvidia-smi) and the NVIDIA container runtime are
+# registered with Docker. DOCKER_RUNTIME is consumed via ${DOCKER_RUNTIME:-runc}
+# in docker-compose.yml, so CPU-only hosts fall back to the default runtime.
+if command -v nvidia-smi >/dev/null 2>&1 \
+   && docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q nvidia; then
+  export DOCKER_RUNTIME=nvidia
+  echo "NVIDIA GPU detected - enabling GPU acceleration for Ollama."
+else
+  echo "No NVIDIA GPU detected - Ollama will run on CPU."
+fi
+
 echo "Starting Ollama container..."
 # --wait blocks until the healthcheck passes, so Ollama is ready to accept commands.
 docker compose up -d --wait ollama
