@@ -15,8 +15,16 @@ Word suggestions from the local SQLite vocabulary appear as you type — press *
 
 ## Prerequisites
 
-- Docker Desktop (for the Ollama LLM server)
-- Python 3 + pip (dependencies install into `.venv`)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (for the Ollama LLM server)
+- [Python 3 + pip](https://www.python.org/downloads/) (dependencies install into `.venv`)
+
+
+## Clone my GitHub repo
+
+```bash
+git clone https://github.com/PiWebswiss/AI_Notepad.git
+cd AI_Notepad
+```
 
 ## Run on Windows
 
