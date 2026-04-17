@@ -50,7 +50,7 @@ On **first run**, the script will ask if you want a desktop shortcut. The shortc
 Set the model in `.env`:
 
 ```env
-OLLAMA_MODEL=gemma4:e2b
+OLLAMA_MODEL=gemma3:4b
 ```
 
 The model is downloaded automatically on first run. To change the model, edit `.env` and restart the app. The new model name will appear in the status bar.
