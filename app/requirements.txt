@@ -1,3 +1,9 @@
+# System dependency (not installable via pip): Tk / tkinter.
+# Bundled with Python on Windows and macOS. On Linux install manually:
+#   Debian/Ubuntu: sudo apt-get install python3-tk
+#   Fedora/RHEL:   sudo dnf install python3-tkinter
+#   Arch:          sudo pacman -S tk
+
 # Ollama Python client used by ui.py to call the local Ollama server.
 ollama
 # wordfreq is used by seed_db.py to build the initial EN/FR vocabulary.

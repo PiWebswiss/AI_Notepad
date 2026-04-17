@@ -50,6 +50,17 @@ else
   echo "No NVIDIA GPU detected - Ollama will run on CPU."
 fi
 
+# Install fonts-cascadia-code if missing: the editor uses Cascadia Code natively
+# on Windows, and this makes the Linux UI visually match. Best-effort only -
+# skipped silently if apt-get, sudo, or the package are unavailable.
+if command -v fc-list >/dev/null 2>&1 \
+   && ! fc-list | grep -qi "cascadia code" \
+   && command -v apt-get >/dev/null 2>&1 \
+   && command -v sudo >/dev/null 2>&1; then
+  echo "Installing fonts-cascadia-code (matches the Windows editor font)..."
+  sudo apt-get install -y fonts-cascadia-code || true
+fi
+
 echo "Starting Ollama container..."
 # --wait blocks until the healthcheck passes, so Ollama is ready to accept commands.
 docker compose up -d --wait ollama

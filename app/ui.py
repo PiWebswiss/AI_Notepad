@@ -212,10 +212,41 @@ POPUP_HEADER = "#0b1423" # Popup header bar background.
 POPUP_BORDER = "#22324a" # Popup border color.
 POPUP_SHADOW = "#05080e" # Outer shadow / padding area of popups.
 
-# Font used for toolbar labels and hints.
-FONT_UI = ("Segoe UI Semibold", 11)
+# Font families resolved at startup based on what is actually installed on the
+# host. Windows provides Segoe UI and Cascadia Code natively; on Linux, install
+# fonts-cascadia-code (apt) for an exact match with the Windows editor font.
+# The Segoe UI fallback chain uses Noto Sans / DejaVu Sans as free substitutes.
+FONT_FAMILY_UI = "Segoe UI"
+FONT_FAMILY_UI_SEMIBOLD = "Segoe UI Semibold"
+FONT_FAMILY_MONO = "Cascadia Code"
+
+def _resolve_font_families():
+    """Pick the first available family in each fallback chain (requires Tk root)."""
+    global FONT_FAMILY_UI, FONT_FAMILY_UI_SEMIBOLD, FONT_FAMILY_MONO, FONT_UI, FONT_EDIT
+    import tkinter.font as tkfont
+    available = set(tkfont.families())
+
+    def pick(candidates):
+        for c in candidates:
+            if c in available:
+                return c
+        return candidates[-1]
+
+    FONT_FAMILY_UI = pick(["Segoe UI", "Noto Sans", "DejaVu Sans", "Liberation Sans"])
+    FONT_FAMILY_UI_SEMIBOLD = pick(
+        ["Segoe UI Semibold", "Noto Sans", "DejaVu Sans", "Liberation Sans"]
+    )
+    FONT_FAMILY_MONO = pick(
+        ["Cascadia Code", "Cascadia Mono", "DejaVu Sans Mono", "Liberation Mono", "Monospace"]
+    )
+    # Rebuild the tuple fonts now that the families are known.
+    FONT_UI = (FONT_FAMILY_UI_SEMIBOLD, 11)
+    FONT_EDIT = (FONT_FAMILY_MONO, 14)
+
+# Font used for toolbar labels and hints. Rebuilt after Tk init by _resolve_font_families().
+FONT_UI = (FONT_FAMILY_UI_SEMIBOLD, 11)
 # Font used in the main text editor area.
-FONT_EDIT = ("Cascadia Code", 14)
+FONT_EDIT = (FONT_FAMILY_MONO, 14)
 
 # ================= UTILITIES =================
 # Matches a single "word character": letters (including accented Latin), apostrophes, and hyphens.
@@ -236,6 +267,16 @@ class AINotepad(tk.Tk):
         # 3) Ask LLM asynchronously for richer suggestions/fixes.
         # 4) Ignore stale async results via request id + doc version.
         super().__init__()
+        # Tk root exists now; resolve which font families are actually installed.
+        _resolve_font_families()
+        # Match Windows scaling on Linux: Tk defaults to 72 DPI on X11, which makes
+        # every widget and font render smaller than on Windows (where Tk picks up
+        # the real system DPI). 1.333 corresponds to 96 DPI, the Windows baseline.
+        if not sys.platform.startswith("win"):
+            try:
+                self.tk.call("tk", "scaling", 1.333)
+            except Exception:
+                pass
         self.title("AI Notepad")
         # Default window size (width x height).
         self.geometry("1800x1000")
@@ -381,18 +422,25 @@ class AINotepad(tk.Tk):
         left = tk.Frame(top, bg=PANEL)
         left.pack(side="left", padx=10, pady=7)
 
-        tk.Label(left, text="AI Notepad", bg=PANEL, fg=FG, font=("Segoe UI", 18, "bold")).pack(
+        tk.Label(left, text="AI Notepad", bg=PANEL, fg=FG, font=(FONT_FAMILY_UI, 18, "bold")).pack(
             side="left", padx=(0, 18)
         )
 
         def btn(txt, cmd):
+            # borderwidth=0 + highlightthickness=0 remove the default button
+            # border and focus ring that Tk/X11 draws on Linux despite relief="flat".
             b = tk.Button(
                 left, text=txt, command=cmd,
                 bg=PANEL, fg=FG,
                 activebackground="#14203a", activeforeground=FG,
-                relief="flat", font=("Segoe UI", 12),
+                relief="flat", borderwidth=0, highlightthickness=0,
+                font=(FONT_FAMILY_UI, 12),
                 padx=12, pady=6
             )
+            # Manual hover effect: Linux Tk does not apply activebackground on hover,
+            # only on click, so we toggle bg ourselves for a Windows-like feel.
+            b.bind("<Enter>", lambda e, w=b: w.configure(bg="#14203a"))
+            b.bind("<Leave>", lambda e, w=b: w.configure(bg=PANEL))
             b.pack(side="left", padx=6)
             return b
 
@@ -403,7 +451,7 @@ class AINotepad(tk.Tk):
         btn("Correct All", self.correct_document)
 
         # Status bar label (right-aligned): shows model name and detected language.
-        self.status = tk.Label(top, text=self._status_base_text(), bg=PANEL, fg=MUTED, font=("Segoe UI", 13))
+        self.status = tk.Label(top, text=self._status_base_text(), bg=PANEL, fg=MUTED, font=(FONT_FAMILY_UI, 13))
         self.status.pack(side="right", padx=12)
 
         # --- Main editor area ---
@@ -453,13 +501,15 @@ class AINotepad(tk.Tk):
         self.word_popup.place_forget()
         self.word_btns = []
         for i in range(POPUP_MAX_ITEMS):
+            # borderwidth=0 + highlightthickness=0 kill the per-item rectangle
+            # that Tk/X11 draws around each button on Linux.
             b = tk.Button(
                 self.word_popup, text="",
                 command=lambda i=i: self.accept_word(i),
                 bg=PANEL, fg=FG,
                 activebackground="#14203a", activeforeground=FG,
-                relief="flat",
-                font=("Segoe UI", 11),
+                relief="flat", borderwidth=0, highlightthickness=0,
+                font=(FONT_FAMILY_UI, 11),
                 padx=10, pady=4,
                 anchor="w"
             )
@@ -500,7 +550,7 @@ class AINotepad(tk.Tk):
             text="Correction preview",
             bg=POPUP_HEADER,
             fg=FG,
-            font=("Segoe UI Semibold", 11),
+            font=(FONT_FAMILY_UI_SEMIBOLD, 11),
         ).pack(side="left", padx=(12, 6), pady=(8, 6))
 
         tk.Label(
@@ -508,7 +558,7 @@ class AINotepad(tk.Tk):
             text="TAB apply  |  ESC close",
             bg=POPUP_HEADER,
             fg=MUTED,
-            font=("Segoe UI", 10),
+            font=(FONT_FAMILY_UI, 10),
         ).pack(side="left", padx=6, pady=(8, 6))
 
         tk.Button(
@@ -519,8 +569,8 @@ class AINotepad(tk.Tk):
             fg=MUTED,
             activebackground=POPUP_BG,
             activeforeground=FG,
-            relief="flat",
-            font=("Segoe UI", 10),
+            relief="flat", borderwidth=0, highlightthickness=0,
+            font=(FONT_FAMILY_UI, 10),
             padx=6,
             pady=0,
         ).pack(side="right", padx=(6, 10), pady=(6, 6))
@@ -538,7 +588,7 @@ class AINotepad(tk.Tk):
             insertbackground=FG,
             relief="flat",
             borderwidth=0,
-            font=("Segoe UI", 12),
+            font=(FONT_FAMILY_UI, 12),
             padx=8,
             pady=8,
             highlightthickness=0,
