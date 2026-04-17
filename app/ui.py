@@ -127,26 +127,8 @@ except ValueError:
     MODEL_CHECK_INTERVAL = 30.0
 # Serialize model calls when enabled.
 LLM_SERIAL = env_flag("LLM_SERIAL", True)
-# Ollama inference options, all tunable via .env — no per-model magic in code.
-# The model stops naturally when done; num_predict is only a safety ceiling.
-def _env_int(name: str, default: int) -> int:
-    try:
-        return int(os.environ.get(name, str(default)))
-    except ValueError:
-        return default
-
-def _env_float(name: str, default: float) -> float:
-    try:
-        return float(os.environ.get(name, str(default)))
-    except ValueError:
-        return default
-
-# Safety cap on generated tokens. The model normally stops well before this.
-OLLAMA_NUM_PREDICT = _env_int("OLLAMA_NUM_PREDICT", 900)
-# Context window allocated by Ollama. Must be >= MAX_CONTEXT_CHARS / ~4 (chars-to-token ratio).
-OLLAMA_NUM_CTX = _env_int("OLLAMA_NUM_CTX", 2048)
-# Sampling temperature. 0.0 = deterministic; useful for spell/grammar correction.
-OLLAMA_TEMPERATURE = _env_float("OLLAMA_TEMPERATURE", 0.0)
+# Inference options (num_predict, num_ctx, temperature) are left to Ollama's
+# per-model Modelfile defaults. Override via Ollama Modelfile if needed.
 
 # --- Behavior toggles ---
 # Enable SQLite vocabulary loading and usage.
@@ -1498,11 +1480,13 @@ class AINotepad(tk.Tk):
                 "Reply ONLY with the corrected text, nothing else."
             )
 
-        # Send the block to Ollama with temperature=0 (deterministic) and a bounded token budget.
+        # temperature=0.0 forces deterministic output (same input -> same correction),
+        # essential for spell/grammar checking. Other inference parameters (num_ctx,
+        # num_predict) are left to Ollama's per-model Modelfile defaults.
         resp = self._ollama_chat(
             messages=[{"role": "system", "content": system},
                       {"role": "user", "content": block}],
-            options={"temperature": OLLAMA_TEMPERATURE, "num_predict": OLLAMA_NUM_PREDICT, "num_ctx": OLLAMA_NUM_CTX},
+            options={"temperature": 0.0},
         )
         # Extract the corrected text; fall back to original if the model returned nothing.
         out = clean_llm_text(_extract_chat_content(resp))
