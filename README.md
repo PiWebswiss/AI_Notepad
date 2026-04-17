@@ -18,6 +18,38 @@ Word suggestions from the local SQLite vocabulary appear as you type — press *
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (for the Ollama LLM server)
 - [Python 3 + pip](https://www.python.org/downloads/) (dependencies install into `.venv`)
 
+### Linux — additional system packages
+
+On Linux `tkinter` is not bundled with Python and must be installed from the system package manager (it cannot be installed via `pip`).
+
+**Debian / Ubuntu:**
+```bash
+sudo apt-get install python3-tk
+```
+
+**Fedora / RHEL:**
+```bash
+sudo dnf install python3-tkinter
+```
+
+**Arch:**
+```bash
+sudo pacman -S tk
+```
+
+To uninstall it later:
+
+```bash
+# Debian / Ubuntu
+sudo apt-get remove python3-tk
+
+# Fedora / RHEL
+sudo dnf remove python3-tkinter
+
+# Arch
+sudo pacman -R tk
+```
+
 ## GPU acceleration
 
 Ollama uses GPU acceleration automatically if an NVIDIA GPU and the NVIDIA Container Toolkit are available. On systems without a GPU, the model runs on CPU — no configuration needed.
