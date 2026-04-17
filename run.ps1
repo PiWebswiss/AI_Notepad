@@ -89,7 +89,9 @@ if (-not (Test-Path $venvPath)) {
 # Skip pip install if requirements.txt hasn't changed since the last successful install.
 # The sentinel file is touched after a successful install to record the timestamp.
 $reqFile = Join-Path $appDir "requirements.txt"
-$sentinel = Join-Path $root ".deps-installed"
+# Sentinel lives inside the venv so that deleting/recreating the venv
+# automatically invalidates it (no stale "deps up to date" on an empty venv).
+$sentinel = Join-Path $venvPath ".deps-installed"
 if (-not (Test-Path $sentinel) -or (Get-Item $reqFile).LastWriteTime -gt (Get-Item $sentinel).LastWriteTime) {
   Write-Host "Installing Python dependencies..."
   # Upgrade pip itself first to avoid warnings about an outdated installer.

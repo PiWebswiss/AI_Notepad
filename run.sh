@@ -89,7 +89,9 @@ fi
 # Skip pip install if requirements.txt hasn't changed since the last successful install.
 # The sentinel file is touched after a successful install to record the timestamp.
 REQ_FILE="$APP_DIR/requirements.txt"
-SENTINEL="$ROOT/.deps-installed"
+# Sentinel lives inside the venv so that deleting/recreating the venv
+# automatically invalidates it (no stale "deps up to date" on an empty venv).
+SENTINEL="$VENV_PATH/.deps-installed"
 if [ ! -f "$SENTINEL" ] || [ "$REQ_FILE" -nt "$SENTINEL" ]; then
   echo "Installing Python dependencies..."
   # Upgrade pip itself first to avoid warnings about an outdated installer.

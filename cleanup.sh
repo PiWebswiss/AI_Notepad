@@ -36,6 +36,12 @@ confirm_remove() {
 # The venv takes time to recreate (pip install), so ask before removing.
 confirm_remove "$VENV_PATH" "virtual env"
 
+# Remove the legacy root-level pip-install sentinel if it exists.
+# Current versions place the sentinel inside .venv, so it is deleted with the venv;
+# this line cleans up orphans left behind by older installations.
+LEGACY_SENTINEL="$ROOT/.deps-installed"
+if [ -f "$LEGACY_SENTINEL" ]; then rm -f "$LEGACY_SENTINEL"; fi
+
 # The data directory holds the SQLite vocab DB — always removed on cleanup.
 if [ -e "$DATA_PATH" ]; then
   echo "Removing data directory (DB) at '$DATA_PATH'..."
