@@ -105,9 +105,11 @@ if (-not (Test-Path $sentinel) -or (Get-Item $reqFile).LastWriteTime -gt (Get-It
 }
 
 # DB_FILE tells ui.py and seed_db.py where to store the SQLite vocabulary database.
-$env:DB_FILE = Join-Path (Join-Path $root "data") "ainotepad_vocab.db"
+# Respect any value already set in the environment; fall back to the project-local path.
+if (-not $env:DB_FILE) { $env:DB_FILE = Join-Path (Join-Path $root "data") "ainotepad_vocab.db" }
 # OLLAMA_HOST points the Python client at the local Ollama container (default port 11434).
-$env:OLLAMA_HOST = "http://localhost:11434"
+# Respect any value already set in the environment; fall back to localhost.
+if (-not $env:OLLAMA_HOST) { $env:OLLAMA_HOST = "http://localhost:11434" }
 # Ensure the data directory exists before seed_db.py tries to create the file inside it.
 New-Item -ItemType Directory -Force -Path (Split-Path $env:DB_FILE) | Out-Null
 
@@ -136,13 +138,14 @@ if ($createShortcut) {
         # Use the WScript.Shell COM object — the standard way to create .lnk shortcuts on Windows.
         $shell = New-Object -ComObject WScript.Shell
         $shortcut = $shell.CreateShortcut($shortcutFile)
-        # Configure the shortcut to launch this script via PowerShell in a minimized window.
+        # Direct PowerShell invocation. -WindowStyle Hidden minimises the console
+        # but cannot fully prevent conhost.exe from briefly flashing on launch;
+        # this is a Windows limitation with no wrapper-free workaround.
         $shortcut.TargetPath = $ps
-        $shortcut.Arguments = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $root 'run.ps1')`""
+        $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $root 'run.ps1')`""
         $shortcut.WorkingDirectory = $root
         $shortcut.Description = "Launch AI Notepad"
-        # 0 = hidden window: no console visible at all.
-        $shortcut.WindowStyle = 0
+        $shortcut.WindowStyle = 7  # 7 = minimized, not activated
         # Apply the custom icon if the PNG-to-ICO conversion succeeded above.
         if (Test-Path $iconIco) { $shortcut.IconLocation = $iconIco }
         # Write the .lnk file to the desktop.

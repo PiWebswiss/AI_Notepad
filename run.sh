@@ -31,7 +31,8 @@ fi
 MODEL="${OLLAMA_MODEL:-}"
 if [ -z "$MODEL" ] && [ -f .env ]; then
   # Parse the last matching line in .env to support overrides at the bottom of the file.
-  MODEL="$(sed -n 's/^OLLAMA_MODEL=//p' .env | tail -n 1)"
+  # The trailing sed strips optional surrounding single or double quotes.
+  MODEL="$(sed -n 's/^OLLAMA_MODEL=//p' .env | tail -n 1 | sed -e 's/^"//;s/"$//' -e "s/^'//;s/'\$//")"
 fi
 # Expose the resolved value so child processes (app) inherit it.
 if [ -n "$MODEL" ]; then
@@ -78,6 +79,17 @@ else
   echo "OLLAMA_MODEL not set; skipping auto model pull."
 fi
 
+# Fail fast if tkinter is missing: the app cannot start without it, and on Linux
+# it is a system package (not pip-installable). A clear message here avoids
+# wasting time on venv + pip install before crashing with a Python traceback.
+if ! python3 -c "import tkinter" 2>/dev/null; then
+  echo "ERROR: tkinter is not installed (required for the GUI)."
+  echo "  Debian/Ubuntu: sudo apt-get install python3-tk"
+  echo "  Fedora/RHEL:   sudo dnf install python3-tkinter"
+  echo "  Arch:          sudo pacman -S tk"
+  exit 1
+fi
+
 # Create a local virtual environment to keep Python dependencies isolated from the system.
 VENV_PATH="$ROOT/.venv"
 PYTHON="$VENV_PATH/bin/python"
@@ -104,9 +116,11 @@ else
 fi
 
 # DB_FILE tells the app and seed_db.py where to store the SQLite vocabulary database.
-export DB_FILE="$ROOT/data/ainotepad_vocab.db"
+# Respect any value already set in the environment; fall back to the project-local path.
+export DB_FILE="${DB_FILE:-$ROOT/data/ainotepad_vocab.db}"
 # OLLAMA_HOST points the Python client at the local Ollama container (default port 11434).
-export OLLAMA_HOST="http://localhost:11434"
+# Respect any value already set in the environment; fall back to localhost.
+export OLLAMA_HOST="${OLLAMA_HOST:-http://localhost:11434}"
 # Ensure the data directory exists before seed_db.py tries to create the file inside it.
 mkdir -p "$(dirname "$DB_FILE")"
 

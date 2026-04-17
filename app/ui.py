@@ -127,20 +127,26 @@ except ValueError:
     MODEL_CHECK_INTERVAL = 30.0
 # Serialize model calls when enabled.
 LLM_SERIAL = env_flag("LLM_SERIAL", True)
-try:
-    # Set the minimum generation budget for model output.
-    OLLAMA_NUM_PREDICT_MIN = int(os.environ.get("OLLAMA_NUM_PREDICT_MIN", "80"))
-    # Set the maximum generation budget for model output.
-    # 1500 is necessary for thinking models (qwen3) which consume tokens in <think> blocks
-    # before emitting the corrected text. Non-thinking models stop naturally well before this.
-    OLLAMA_NUM_PREDICT_MAX = int(os.environ.get("OLLAMA_NUM_PREDICT_MAX", "1500"))
-except ValueError:
-    OLLAMA_NUM_PREDICT_MIN = 200
-    # Use fallback limits when env values cannot be parsed.
-    OLLAMA_NUM_PREDICT_MAX = 900
-if OLLAMA_NUM_PREDICT_MAX < OLLAMA_NUM_PREDICT_MIN:
-    # Keep max at least equal to min.
-    OLLAMA_NUM_PREDICT_MAX = OLLAMA_NUM_PREDICT_MIN
+# Ollama inference options, all tunable via .env — no per-model magic in code.
+# The model stops naturally when done; num_predict is only a safety ceiling.
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+
+# Safety cap on generated tokens. The model normally stops well before this.
+OLLAMA_NUM_PREDICT = _env_int("OLLAMA_NUM_PREDICT", 900)
+# Context window allocated by Ollama. Must be >= MAX_CONTEXT_CHARS / ~4 (chars-to-token ratio).
+OLLAMA_NUM_CTX = _env_int("OLLAMA_NUM_CTX", 2048)
+# Sampling temperature. 0.0 = deterministic; useful for spell/grammar correction.
+OLLAMA_TEMPERATURE = _env_float("OLLAMA_TEMPERATURE", 0.0)
 
 # --- Behavior toggles ---
 # Enable SQLite vocabulary loading and usage.
@@ -825,16 +831,6 @@ class AINotepad(tk.Tk):
 
         self.after(0, ui)
 
-    def _predict_limit(self, text_len: int) -> int:
-        """Compute bounded generation budget from source text size."""
-        # Scale gently with input: corrected output should be ~same length as input.
-        base = max(40, int(text_len / 3))
-        # Add a fixed overhead for thinking models (qwen3, etc.) which emit a
-        # <think>...</think> block before the actual response. Non-thinking models
-        # (gemma3, etc.) stop naturally when done, so this overhead costs nothing for them.
-        base += 500
-        return max(OLLAMA_NUM_PREDICT_MIN, min(OLLAMA_NUM_PREDICT_MAX, base))
-
     def _ensure_model_available(self) -> bool:
         """Check and cache availability of the configured Ollama model.
         Queries Ollama only every MODEL_CHECK_INTERVAL seconds to avoid
@@ -892,7 +888,7 @@ class AINotepad(tk.Tk):
     def _do_chat(self, client, messages, options):
         """Call client.chat. Pass think=False for models that support it (e.g. qwen3)
         to avoid wasting tokens on reasoning blocks. Falls back silently for models
-        that don't support the parameter (e.g. gemma4)."""
+        that don't support the parameter (e.g. gemma3)."""
         try:
             return client.chat(model=MODEL, messages=messages, options=options, think=False)
         except TypeError:
@@ -1506,7 +1502,7 @@ class AINotepad(tk.Tk):
         resp = self._ollama_chat(
             messages=[{"role": "system", "content": system},
                       {"role": "user", "content": block}],
-            options={"temperature": 0.0, "num_predict": self._predict_limit(len(block)), "num_ctx": 4096},
+            options={"temperature": OLLAMA_TEMPERATURE, "num_predict": OLLAMA_NUM_PREDICT, "num_ctx": OLLAMA_NUM_CTX},
         )
         # Extract the corrected text; fall back to original if the model returned nothing.
         out = clean_llm_text(_extract_chat_content(resp))
