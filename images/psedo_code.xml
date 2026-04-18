@@ -73,8 +73,8 @@
   <rect x="100" y="625" width="500" height="75" rx="6" fill="#FEF9E7" stroke="#F39C12" filter="url(#shadow)"/>
   <text x="130" y="650" font-size="12" font-weight="bold">7.</text>
   <text x="150" y="645" font-size="11.5">RECEVOIR la reponse du modele</text>
-  <text x="150" y="663" font-size="11.5">NETTOYER la sortie</text>
-  <text x="150" y="681" font-size="11.5">SI correction invalide ALORS IGNORER</text>
+  <text x="150" y="663" font-size="11.5">NETTOYER la réponse</text>
+  <text x="150" y="681" font-size="11.5">IGNORER si invalide, NOTIFIER si déjà correct</text>
   <line x1="350" y1="700" x2="350" y2="720" stroke="#2E75B6" marker-end="url(#arrow)"/>
 
   <!-- # ===== STEP 8 ===== -->
