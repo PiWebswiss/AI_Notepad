@@ -238,4 +238,89 @@ Ajout du bloc `deploy.resources.reservations.devices` dans `docker-compose.yml` 
 - Typo corrigee : `dc AI_Notepad` -> `cd AI_Notepad`.
 - Liens ajoutes vers les installateurs de Docker Desktop et Python dans la section Prerequisites.
 
-**Fichier modifie :** `README.md`.
+
+### Detection GPU automatique via DOCKER_RUNTIME
+
+Le bloc `deploy.resources.reservations.devices` fixe dans `docker-compose.yml` provoquait une erreur `could not select device driver "nvidia"` sur toute machine sans NVIDIA Container Toolkit (VM, laptop sans GPU, CI). Remplace par une variable `${DOCKER_RUNTIME:-runc}` dans le champ `runtime`, pilotee par `run.sh` / `run.ps1` qui detectent `nvidia-smi` + runtime nvidia Docker au lancement.
+
+**Resultat :** GPU active automatiquement sur les machines equipees, CPU fallback propre ailleurs. Un seul `docker-compose.yml`.
+
+**Fichiers modifies :** `docker-compose.yml`, `run.sh`, `run.ps1`.
+
+### Sentinel pip deplace dans le venv
+
+Le fichier `.deps-installed` vivait a la racine du projet. Si le `.venv` etait supprime ou manquant (copie projet sans venv, rsync vers un Pi), le sentinel restait -> `run.sh` creait un venv vide mais sautait `pip install` -> crash au demarrage sur `ModuleNotFoundError`.
+
+**Correction :** le sentinel est maintenant dans `$VENV_PATH/.deps-installed`, son cycle de vie est lie au venv.
+
+**Fichiers modifies :** `run.sh`, `run.ps1`, `cleanup.sh` (suppression des sentinels legacy a la racine).
+
+### Check tkinter en amont dans run.sh
+
+Si `python3-tk` manquait sur Linux, l'utilisateur subissait tout le pipeline (venv + pip install + seed_db) avant un traceback Python obscur. Ajout d'un check `python3 -c "import tkinter"` avant la creation du venv, avec message clair par distro (apt/dnf/pacman).
+
+**Fichier modifie :** `run.sh`.
+
+### DB_FILE et OLLAMA_HOST respectent l'env utilisateur
+
+Les scripts faisaient `export DB_FILE=...` sans fallback, ecrasant toute valeur deja definie par l'utilisateur. Remplace par `${DB_FILE:-default}` en bash et `if (-not $env:DB_FILE)` en PowerShell.
+
+**Fichiers modifies :** `run.sh`, `run.ps1`.
+
+### Parsing `.env` plus robuste
+
+Le parser sed de `run.sh` ne retirait pas les guillemets entourants. `OLLAMA_MODEL="gemma3:1B"` devenait `"gemma3:1B"` litteralement, incluant les quotes. Ajout d'un sed pour strip les guillemets simples et doubles.
+
+**Fichier modifie :** `run.sh`.
+
+### Auto-resolution des polices par plateforme
+
+Les polices `Segoe UI` et `Cascadia Code` etaient codees en dur dans `ui.py`, alors qu'elles n'existent pas sur Linux. Remplacees par 3 constantes (`FONT_FAMILY_UI`, `FONT_FAMILY_UI_SEMIBOLD`, `FONT_FAMILY_MONO`) resolues au demarrage via `tkinter.font.families()` avec des chaines de fallback : Segoe UI -> Noto Sans -> DejaVu Sans, Cascadia Code -> Cascadia Mono -> DejaVu Sans Mono.
+
+**Fichiers modifies :** `app/ui.py` (10 occurrences hardcodees remplacees), `run.sh` (install auto de `fonts-cascadia-code` via apt).
+
+### Scaling DPI sur Linux
+
+Tk utilise 72 DPI par defaut sur X11, ce qui fait rendre tous les widgets et polices plus petits que sur Windows (qui remonte le vrai DPI). Ajout d'un `self.tk.call("tk", "scaling", 1.333)` sur non-Windows juste apres `super().__init__()` pour aligner le rendu Linux sur la baseline Windows 96 DPI.
+
+**Fichier modifie :** `app/ui.py`.
+
+### Bordures de boutons supprimees sur Linux
+
+`tk.Button` dessinait une bordure visible et un anneau de focus sur Linux (X11) meme avec `relief="flat"`. Ajout de `borderwidth=0` et `highlightthickness=0` sur les 3 `tk.Button` (toolbar, popup de mots, bouton X). Hover effect manuel via `<Enter>`/`<Leave>` sur les boutons toolbar car `activebackground` n'est pas applique au survol sur Linux Tk.
+
+**Fichier modifie :** `app/ui.py`.
+
+### Installation automatique de fonts-cascadia-code
+
+Sur Linux, `run.sh` detecte si `fonts-cascadia-code` est absent et le propose via `apt-get install`. Best-effort, skippe silencieusement si `sudo`, `apt-get` ou le paquet ne sont pas disponibles. Permet l'alignement visuel de l'editeur avec la version Windows.
+
+**Fichier modifie :** `run.sh`.
+
+### Documentation de la dependance systeme tkinter
+
+`requirements.txt` a une en-tete documentant que `tkinter` n'est pas installable via pip et donnant les commandes d'installation par distro (apt, dnf, pacman). Section "Linux - additional system packages" ajoutee au README avec les commandes d'installation et de desinstallation.
+
+**Fichiers modifies :** `app/requirements.txt`, `README.md`.
+
+### Simplification des options Ollama
+
+L'ancienne logique `_predict_limit()` scaling avec magiques (`+500` pour thinking models, `+60` overhead, `/3` ratio, `OLLAMA_NUM_PREDICT_MIN`/`MAX`) a ete entierement supprimee. Seul `temperature=0.0` reste passe explicitement a Ollama (indispensable pour avoir des corrections deterministes). `num_ctx` et `num_predict` sont laisses aux defauts du Modelfile du modele.
+
+**Fichier modifie :** `app/ui.py` — suppression de `_predict_limit()`, `OLLAMA_NUM_PREDICT_MIN`, `OLLAMA_NUM_PREDICT_MAX`, `_env_int()`, `_env_float()`.
+
+### Ajout de keep_alive pour eviter les cold starts
+
+Ollama decharge le modele apres 5 min d'inactivite par defaut. Chaque correction apres une pause payait alors un reload de 60+ secondes. Ajout de `keep_alive="30m"` dans `_do_chat()` pour garder le modele en VRAM entre les appels.
+
+**Fichier modifie :** `app/ui.py` — methode `_do_chat()`.
+
+### Correction du bug ponctuation empilee (!. et .!)
+
+Quand l'utilisateur tapait `.` et que le LLM ajoutait `!` pour emphase, le texte corrige affichait `!.` ou `.!`. Ajout dans `post_fix_spacing()` de deux regex qui collapse ces melanges vers `.` (la ponctuation neutre de l'utilisateur privilegiee sur l'emphase ajoutee par le LLM). Les ellipses (`...`, `...!`, `!...`) sont preservees via des guards de lookahead/lookbehind.
+
+**Fichier modifie :** `app/text_utils.py` — fonction `post_fix_spacing()`.
+
+### Analyse performance : Gemma 3 4B sur RTX 3050 4 Go
+
+Les logs Ollama revelent que `gemma3:4B` (Q4_K_M, ~3.6 Go) ne tient pas entierement dans les 4 Go de VRAM d'une RTX 3050 Laptop apres l'overhead Windows. Resultat : Ollama split le modele en `1.8 GiB GPU` + `1.8 GiB CPU`, ce qui ralentit l'inference (transferts VRAM/RAM constants). Le modele reste utilisable mais avec une vitesse reduite. Pour une vitesse full-GPU, utiliser `gemma3:1B` via `.env` (~700 Mo, tient entierement en VRAM). Sur des GPU >= 6 Go de VRAM, le 4B passe en full-GPU et atteint sa vitesse nominale.

@@ -169,6 +169,11 @@ def post_fix_spacing(text: str) -> str:
     t = re.sub(r"[ \t]+([,.;:!?])", r"\1", t)
     # Remove spaces before closing brackets: "word )" → "word)".
     t = re.sub(r"[ \t]+([\)\]\}])", r"\1", t)
+    # Collapse mixed sentence-ending punctuation to '.' (the neutral choice).
+    # Covers cases where the model adds '!' or '?' next to the user's '.'.
+    # Ellipsis is preserved via the (?<!\.) / (?!\.) guards on both sides.
+    t = re.sub(r"(?<!\.)[!?]+\.(?!\.)", ".", t)
+    t = re.sub(r"(?<!\.)\.[!?]+(?!\.)", ".", t)
     # Collapse multiple spaces into one.
     t = re.sub(r"[ \t]{2,}", " ", t)
     return t
