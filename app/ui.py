@@ -870,11 +870,17 @@ class AINotepad(tk.Tk):
     def _do_chat(self, client, messages, options):
         """Call client.chat. Pass think=False for models that support it (e.g. qwen3)
         to avoid wasting tokens on reasoning blocks. Falls back silently for models
-        that don't support the parameter (e.g. gemma3)."""
+        that don't support the parameter (e.g. gemma3).
+
+        keep_alive="30m" keeps the model loaded in VRAM for 30 minutes between calls.
+        Without it, Ollama unloads after 5 min of idle, forcing a costly reload on
+        the next correction (2-10s perceived latency)."""
         try:
-            return client.chat(model=MODEL, messages=messages, options=options, think=False)
+            return client.chat(model=MODEL, messages=messages, options=options,
+                               think=False, keep_alive="30m")
         except TypeError:
-            return client.chat(model=MODEL, messages=messages, options=options)
+            return client.chat(model=MODEL, messages=messages, options=options,
+                               keep_alive="30m")
 
     def clear_ai(self):
         """Hide all AI overlays (popups, ghost, underlines) and reset correction state.
