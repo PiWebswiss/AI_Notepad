@@ -35,10 +35,6 @@ function Confirm-Remove($path, $description) {
 # The venv takes time to recreate (pip install), so ask before removing.
 Confirm-Remove $venvPath "virtual env"
 
-# Remove the pip-install sentinel so the next run re-installs dependencies.
-$sentinel = Join-Path $root ".deps-installed"
-if (Test-Path $sentinel) { Remove-Item -Force $sentinel }
-
 # The data directory holds the SQLite vocab DB — always removed on cleanup.
 if (Test-Path $dataPath) {
   Write-Host "Removing data directory (DB) at '$dataPath'..."
