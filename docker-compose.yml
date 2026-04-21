@@ -1,3 +1,4 @@
+# This file was developed with the assistance of OpenAI Codex (ChatGPT).
 # Compose topology:
 # - ollama: LLM inference API service (the GUI app runs natively on host via run.ps1)
 services:

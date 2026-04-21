@@ -1,3 +1,5 @@
+# This file was developed with the assistance of OpenAI Codex (ChatGPT).
+#
 # AI notepad
 # - Fast LOCAL word suggestions from SQLite vocabulary (popup + grey ghost suffix)
 # - LLM used for grammar/spelling correction (auto preview popup, TAB to apply)
