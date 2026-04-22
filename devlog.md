@@ -1,326 +1,215 @@
-# Dev Log - AI Notepad
+# Dev Log — AI Notepad
 
-### Ajout de commentaires dans tous les fichiers
+Journal des modifications apportées au projet, regroupées par thème.
 
-Ajout de commentaires explicatifs dans tous les fichiers du projet pour faciliter la comprehension et la maintenance du code.
+---
 
-**Fichiers modifies :**
+## Infrastructure et scripts de lancement
 
-- **run.ps1** : commentaires sur les variables (`$appDir`, `$venvPath`, `$shell`), les proprietes du raccourci desktop, et le sentinel pip.
-- **cleanup.ps1** : commentaires sur les chemins d'artefacts locaux et l'image Docker.
-- **app/db.py** : commentaires sur les constantes (`DB_FILE`, `ALLOW_UNKNOWN_WORDS`, `_ACCENT_RE`), les stopwords, le cache de langue, la detection de langue (scoring), et le filtrage par langue.
-- **app/llm.py** : commentaires sur le cache client, le format de reponse Pydantic.
-- **app/text_utils.py** : commentaires organises par sections (accent handling, text chunking, deduplication, LLM output cleaning, correction result checks, post-correction formatting). Explication des regex de nettoyage et des heuristiques de detection de chatbot.
-- **app/suggestions.py** : commentaires inline sur chaque parametre de `rank_local_candidates`, explication des phases prefix matching et fuzzy matching, et du tri final.
-- **app/ui.py** : commentaires sur le theme (palette de couleurs), les handles de debounce, les IDs de requete, l'etat des suggestions/corrections, les bindings clavier, les popups, et la barre d'indice.
+### Renommage de `app.py` en `ui.py`
 
-### Nettoyage des espaces d'alignement
+Lors du refactoring en modules, le fichier principal a été renommé `app.py` → `ui.py`. `run.ps1`, `run.sh` et `requirements.txt` pointaient encore vers l'ancien nom, ce qui provoquait une erreur `No such file or directory` au lancement. Toutes les références ont été mises à jour.
 
-Suppression des espaces excessifs utilises pour aligner les `=` dans les scripts PowerShell et dans `ui.py`.
+### Suppression du Dockerfile et des services Docker inutilisés
 
-**Fichiers modifies :**
+L'application Tkinter tourne nativement sur l'hôte (via `run.ps1` ou `run.sh`) — seul Ollama a besoin de Docker. Le `app/Dockerfile` et les services `app` et `ollama_init` du `docker-compose.yml` n'étaient jamais utilisés, ils ont été supprimés. Le `run.sh` a été réécrit pour suivre le même flux que `run.ps1` (Python natif + Ollama seul dans Docker) — l'ancienne version utilisait X11 et un conteneur app qui n'existaient plus.
 
-- **run.ps1** : `$root`, `$shell`, `$shortcut.*`, `$reqFile`.
-- **cleanup.ps1** : `$venvPath`, `$dataPath`.
+### Détection GPU automatique
 
-### Suppression du code de compatibilite ollama
+Le bloc `deploy.resources.reservations.devices` fixé dans `docker-compose.yml` provoquait une erreur `could not select device driver "nvidia"` sur toute machine sans NVIDIA Container Toolkit (VM, laptop sans GPU, CI). Remplacé par une variable `${DOCKER_RUNTIME:-runc}` dans le champ `runtime`, pilotée par `run.sh` / `run.ps1` qui détectent `nvidia-smi` + runtime nvidia Docker au lancement. GPU activé automatiquement sur les machines équipées, fallback CPU propre ailleurs.
 
-Le projet installe toujours la derniere version de la librairie `ollama` via pip. Le code de compatibilite avec les anciennes versions (format `dict` vs Pydantic, `TypeError` fallback pour `timeout` et `think=False`) etait donc inutile.
+### Healthcheck Docker pour Ollama
 
-**Fichiers modifies :**
+Les scripts de lancement utilisaient une boucle qui réessayait `ollama list` jusqu'à 20 fois (1 s entre chaque tentative) pour attendre que le serveur Ollama soit prêt. Remplacé par un healthcheck Docker natif (ping `ollama list` toutes les 2 s) et un `docker compose up -d --wait ollama` qui bloque jusqu'à ce que le healthcheck passe. Le healthcheck utilisait initialement `curl` absent de l'image Ollama — corrigé pour utiliser la commande `ollama list` garantie présente.
 
-- **app/llm.py** :
-  - `get_ollama_client()` : suppression du `try/except TypeError` autour de `ollama.Client(host, timeout)`.
-  - `extract_chat_content()` : suppression du chemin `isinstance(resp, dict)`, conserve uniquement `resp.message.content`.
+### Sentinel pip déplacé dans le venv
 
-- **app/ui.py** :
-  - `_ensure_model_available()` : suppression du double chemin `dict`/Pydantic pour `data.list()` et `m.model`. Utilise directement `data.models` et `m.model`.
-  - `_do_chat()` : suppression du `try/except TypeError` autour de `think=False`. Appel direct avec `think=False`.
+Le fichier `.deps-installed` vivait à la racine du projet. Si le `.venv` était supprimé ou manquant (copie projet sans venv, rsync vers un Pi), le sentinel restait → `run.sh` créait un venv vide mais sautait `pip install` → crash au démarrage sur `ModuleNotFoundError`. Le sentinel est maintenant dans `$VENV_PATH/.deps-installed` ; son cycle de vie est lié au venv.
 
-### Ajout du point final dans post_fix_capitalization()
+### Check tkinter en amont dans `run.sh`
 
-La fonction `post_fix_capitalization()` dans `text_utils.py` s'assurait deja que chaque phrase commence par une majuscule. Elle verifie maintenant aussi que le texte se termine par une ponctuation de fin de phrase (`.`, `!` ou `?`), et ajoute un point si ce n'est pas le cas.
+Si `python3-tk` manquait sur Linux, l'utilisateur subissait tout le pipeline (venv + pip install + seed_db) avant un traceback Python obscur. Ajout d'un check `python3 -c "import tkinter"` avant la création du venv, avec message clair par distro (apt / dnf / pacman).
 
-### Correction du lancement (run.ps1 → ui.py)
+### `DB_FILE` et `OLLAMA_HOST` respectent l'environnement utilisateur
 
-Le fichier `app.py` a ete renomme en `ui.py` lors du refactoring en modules. Le script `run.ps1` pointait encore vers `app.py`, ce qui provoquait une erreur `No such file or directory` au lancement.
-
-**Correction :** `run.ps1` ligne 144, `app.py` remplace par `ui.py`.
-
-### Correction de l'encodage UTF-8 corrompu dans ui.py
-
-Le fichier `ui.py` contenait des caracteres Unicode doublement encodes (mojibake). Les plages de caracteres accentues (`À-Ö`, `Ø-ö`, `ø-ÿ`) dans les regex et les guillemets typographiques (`'`, `"`) dans `PUNCT_CHARS` etaient illisibles par Python.
-
-**Lignes corrigees :**
-
-- **Ligne 195** (`PUNCT_CHARS`) : guillemets typographiques restaures (`'` et `"`).
-- **Ligne 844** (`get_prev_word`) : regex de tokenisation avec plages accentuees corrigees.
-- **Ligne 1157** (`rebuild_vocab`) : meme regex corrigee.
-- **Ligne 1** : suppression d'un BOM (Byte Order Mark) invisible qui causait une `SyntaxError`.
-
-### Simplification de la correction (suppression des stages 2 et 3)
-
-La correction par bloc utilisait 3 stages : prompt normal, prompt strict (`strong=True`), puis correction ligne par ligne (`_linewise_fix`). En pratique seul le stage 1 etait utile. Les stages 2 et 3 ont ete supprimes.
-
-**Modifications :**
-
-- **app/ui.py** :
-  - `ask_block_fix_plain()` : suppression du parametre `strong` et du texte additionnel "Renvoie TOUT le texte, ligne par ligne".
-  - `_linewise_fix()` : methode supprimee entierement.
-  - `request_block_fix()` : simplifie a un seul appel au lieu de 3 stages.
-  - `correct_document()` : meme simplification par chunk.
-
-### Suppression du Dockerfile et des services Docker inutilises
-
-L'application tourne nativement sur le PC (via `run.ps1` ou `run.sh`). Seul Ollama a besoin de Docker. Le Dockerfile et les services `app` et `ollama_init` n'etaient jamais utilises.
-
-**Modifications :**
-
-- **app/Dockerfile** : supprime.
-- **docker-compose.yml** : services `app` et `ollama_init` supprimes. Ne reste que le service `ollama`.
-- **run.sh** : reecrit pour suivre le meme flux que `run.ps1` (Python natif, Ollama seul dans Docker). L'ancien script utilisait X11 et un conteneur app qui n'existent plus.
-- **run.ps1**, **requirements.txt** : references a `app.py` corrigees en `ui.py`.
-
-### Correction du commentaire .env
-
-Le commentaire dans `.env` disait "override the default model chosen in app/app.py". Le modele est defini uniquement dans `.env`, il n'y a pas de valeur par defaut dans le code. Commentaire corrige.
-
-### Remplacement de la boucle de retry par un healthcheck Docker
-
-Les scripts de lancement utilisaient une boucle qui reessayait `ollama list` jusqu'a 20 fois (1 seconde entre chaque tentative) pour attendre que le serveur Ollama soit pret. Cette approche a ete remplacee par un healthcheck Docker natif.
-
-**Modifications :**
-
-- **docker-compose.yml** : ajout d'un healthcheck sur le service `ollama` qui ping `http://localhost:11434/` toutes les 2 secondes.
-- **run.ps1** : la boucle `for ($i = 0; $i -lt 20; ...)` remplacee par `docker compose up -d --wait ollama`, qui attend que le healthcheck passe avant de continuer.
-- **run.sh** : meme remplacement de la boucle `for i in $(seq 1 20)` par `--wait`.
-
-### Raccourci bureau deplace en fin de script
-
-La creation du raccourci bureau (question + creation) etait faite au debut du script de lancement. Si l'installation plantait ensuite, l'utilisateur se retrouvait avec un raccourci vers une app cassee. La question est maintenant posee au debut, mais le raccourci n'est cree qu'a la fin, une fois que toute l'installation s'est terminee avec succes.
-
-**Fichiers modifies :** `run.ps1`, `run.sh`.
-
-### Correction du bug "stale" sur la correction automatique
-
-Les corrections etaient systematiquement rejetees comme "stale" car le `doc_version` changeait a chaque touche, meme si le texte du bloc n'avait pas change. Le collage (paste) incrementait aussi le compteur plusieurs fois.
-
-**Correction :** le check de fraicheur compare maintenant le texte reel du bloc au lieu du `doc_version`. Si le texte n'a pas change depuis la requete, la correction est acceptee.
-
-**Fichier modifie :** `app/ui.py` — `request_block_fix()`.
-
-### Ajout d'un indicateur de chargement (spinner)
-
-Ajout d'une animation rotative (`| / - \`) dans la barre de statut pendant que l'IA travaille sur une correction. L'animation demarre quand la requete est envoyee et s'arrete quand la reponse arrive.
-
-**Fichier modifie :** `app/ui.py` — nouvelles methodes `_start_spinner()` et `_stop_spinner()`, utilisees dans `request_block_fix()` et `correct_document()`.
-
-### Utilisation de split_into_chunks pour la correction auto
-
-La correction automatique pendant la frappe (`request_block_fix`) envoyait le paragraphe entier en un seul bloc au modele. Pour les longs textes colles sans lignes vides, cela pouvait depasser la capacite du modele (4096 tokens de contexte).
-
-La correction auto utilise maintenant `split_into_chunks()` pour decouper les longs blocs en morceaux de 1600 caracteres, comme le fait deja le bouton Correct All. Les morceaux sont corriges un par un puis reassembles avant d'etre affiches dans un seul popup.
-
-La constante `MAX_FIX_CHARS` (ancienne limite de troncature) a ete supprimee car le decoupage en chunks rend la troncature inutile.
-
-### Ajout d'un spinner graphique
-
-Ajout d'une animation de chargement (arc qui tourne) dans la barre d'outils pendant que l'IA corrige le texte. Le spinner apparait a gauche du texte de statut et disparait quand la reponse arrive.
-
-**Fichier modifie :** `app/ui.py` — nouvelles methodes `_build_spinner()`, `_start_spinner()` et `_stop_spinner()` utilisant un Canvas Tkinter.
-
-### Popup de correction agrandi
-
-Le popup de correction etait trop petit pour afficher tout le texte corrige. Les dimensions maximales ont ete augmentees (720x420 -> 900x550) pour montrer plus de contenu sans scroller.
-
-### Audit complet et corrections
-
-Un audit ligne par ligne de tous les fichiers a revele 5 problemes :
-
-- **Critique : `correct_document()` cassee** — La methode utilisait encore `strong=True` et `_linewise_fix()` qui avaient ete supprimes. Corrige pour utiliser le meme flux simplifie que `request_block_fix()`.
-- **Doublons dans `_FR_APOST_PREFIXES`** (db.py) — Le tuple contenait 20 entrees au lieu de 10 : les memes prefixes etaient dupliques. Remplace par 10 variantes apostrophe droite (`'`) + 10 variantes apostrophe courbe (`\u2019`).
-- **Constante inutilisee `ALLOW_UNKNOWN_WORDS`** (ui.py) — Definie dans ui.py mais jamais utilisee (db.py la lit directement depuis l'environnement). Supprimee.
-- **Mojibake dans les commentaires** (ui.py) — Des tirets em-dash corrompus dans les commentaires ghost_mode (lignes 324-326). Remplaces par `--`.
-- **Mojibake dans une string** (ui.py) — Le caractere ellipsis dans `"Correcting..."` etait corrompu. Remplace par `...`.
-- **Schema SQL duplique** (ui.py) — Les `CREATE TABLE` et `CREATE INDEX` etaient presents dans ui.py alors que seed_db.py les cree deja. Supprimes de ui.py.
-
-### Suppression du code mort (ghost next + LLM word suggestions)
-
-Deux fonctionnalites etaient presentes dans le code mais desactivees par defaut et jamais utilisees :
-
-**Ghost continuation (Copilot-like)** — supprime :
-- Constantes : `USE_LLM_NEXT_GHOST`, `NEXT_GHOST_DEBOUNCE_MS`, `NEXT_GHOST_MAX_CHARS`, `NEXT_GHOST_MIN_INPUT`, `NEXT_GHOST_CONTEXT_CHARS`.
-- Methodes : `request_next_ghost()`, `ask_next_ghost_plain()`, `_prepare_next_ghost()`.
-- Variables : `_after_next`, `_ghost_req`.
-- Le mode ghost `"next"` n'existe plus, seul `"word"` (suffix de suggestion) reste.
-
-**LLM word suggestions** — supprime :
-- Constante : `USE_LLM_WORD_SUGGESTIONS`, `WORD_DEBOUNCE_MS`.
-- Methodes : `request_word_suggestions()`, `ask_word_suggestions_plain()`.
-- Variables : `_after_word`, `_word_req`, `word_cache`.
-- `on_ctrl_space()` simplifie pour juste cycler les suggestions locales.
-- `get_cursor_context()` supprime (jamais appelee).
-
-Les suggestions de mots viennent uniquement du vocabulaire SQLite local, pas du LLM.
-
-### Amelioration des commentaires dans ui.py
-
-Ajout de commentaires dans le style de `text_utils.py` (sections `# ---`, explication du "pourquoi") pour que le code soit comprehensible par quelqu'un qui le lit pour la premiere fois. Commentaires ajoutes sur les imports, la boucle de frappe, les guards de correction, le prompt systeme, le spinner, et les methodes de statut.
-
-### Remise du fallback think=False dans _do_chat()
-
-Le parametre `think=False` empeche les modeles "thinking" (comme qwen3) de gaspiller des tokens en blocs de reflexion `<think>...</think>`. Mais les modeles qui ne supportent pas ce parametre (comme gemma4) provoquaient une erreur silencieuse. Le `try/except TypeError` a ete remis pour gerer les deux cas : les modeles thinking recoivent `think=False`, les autres l'ignorent.
-
-### Changement de modele : gemma4:e2b
-
-Le modele a ete change de `qwen3:1.7b` a `gemma4:e2b` (5.1B parametres, architecture gemma4 de Google). Le modele qwen3 est optimise pour le raisonnement logique, pas pour la correction de texte. gemma4 est meilleur pour suivre des instructions comme "corrige ce texte".
-
-## 2026-04-05
-
-### Correction du popup de correction qui ne s'affichait pas
-
-Le popup de correction (preview) ne s'affichait pas apres un copier-coller ou dans certains cas normaux, bien que le texte en rouge (underlines) apparaisse correctement. Deux bugs identifies :
-
-1. **Ordre d'appel incorrect dans `show_fix_popup()`** — `_reposition_fix_popup()` etait appele avant `deiconify()`. Or `_reposition_fix_popup()` verifie `winfo_viewable()` en premier et retourne immediatement si le popup n'est pas visible. Le popup etait donc rendu visible sans jamais avoir ete positionne. Correction : appeler `deiconify()` puis `update_idletasks()` puis `_reposition_fix_popup()`.
-
-2. **Curseur hors ecran = popup cache** — Dans `_reposition_fix_popup()`, si `bbox("insert")` retournait `None` (curseur hors de la zone visible, typiquement apres un collage de texte long), le popup etait cache au lieu d'etre positionne. Correction : le popup est maintenant centre sur le widget texte en fallback au lieu d'etre cache.
-
-**Fichier modifie :** `app/ui.py` — methodes `show_fix_popup()` et `_reposition_fix_popup()`.
-
-### Erreurs modele visibles au lieu de "No correction needed"
-
-Quand le modele echouait (Ollama down, timeout, etc.), l'application affichait "No correction needed" au lieu d'une erreur. Le code attrapait l'exception silencieusement et renvoyait le texte original, ce qui declenchait le message "No correction needed".
-
-Corrections :
-- Les workers de `request_block_fix()` et `correct_document()` tracent maintenant si une exception a eu lieu (`had_error`). Si oui, le status affiche "Model error" au lieu de "No correction needed".
-- `SHOW_MODEL_ERRORS_IN_STATUS` active par defaut (etait desactive).
-
-**Fichier modifie :** `app/ui.py`.
-
-### Protection "Correct All" sans texte
-
-Appuyer sur "Correct All" avec un editeur vide envoyait une requete inutile au modele. Le texte est maintenant verifie avant tout appel au modele, et le status affiche "No text to correct".
-
-**Fichier modifie :** `app/ui.py` — methode `correct_document()`.
-
-### Raccourci bureau sans console
-
-Le raccourci bureau lancait PowerShell en fenetre minimisee (`WindowStyle = 7`), ce qui laissait une icone dans la barre des taches. Change en fenetre cachee (`-WindowStyle Hidden`, `WindowStyle = 0`) pour que seule l'application Tkinter apparaisse.
-
-**Fichier modifie :** `run.ps1`.
-
-### Messages de lancement plus clairs pour le modele
-
-Le script affichait "Ensuring model..." a chaque lancement, meme quand le modele etait deja present. Remplace par deux messages distincts : "Model already available." ou "Model not found. Downloading...".
-
-**Fichiers modifies :** `run.ps1`, `run.sh`.
-
-### Healthcheck Docker corrige
-
-Le healthcheck utilisait `curl` qui n'est pas installe dans l'image Ollama. Le conteneur etait donc toujours marque `(unhealthy)`. Remplace par `ollama list` qui est garanti present dans l'image.
-
-**Fichier modifie :** `docker-compose.yml`.
-
-### Pseudo-code reecrit en francais
-
-Le diagramme SVG contenait des descriptions informelles. Reecrit en vrai pseudo-code francais avec les mots-cles standards (DEBUT, FIN, TANT QUE, SI, ALORS, ATTENDRE, ENVOYER, RECEVOIR, AFFICHER, APPLIQUER). Suppression des ":" et "+". L'etape 7 (verification de la correction) clarifiee : c'est l'application qui filtre les mauvaises sorties, pas le modele.
-
-**Fichier modifie :** `images/psedo_code.xml`.
-
-### Support GPU automatique
-
-Ajout du bloc `deploy.resources.reservations.devices` dans `docker-compose.yml` pour activer l'acceleration GPU NVIDIA automatiquement quand disponible. Sur les systemes sans GPU (ou sans nvidia-container-toolkit), Docker ignore ce bloc et tourne sur CPU. Aucune configuration manuelle requise.
-
-**Fichiers modifies :** `docker-compose.yml`, `README.md` (section "GPU acceleration").
-
-### Corrections README
-
-- Typo corrigee : `dc AI_Notepad` -> `cd AI_Notepad`.
-- Liens ajoutes vers les installateurs de Docker Desktop et Python dans la section Prerequisites.
-
-
-### Detection GPU automatique via DOCKER_RUNTIME
-
-Le bloc `deploy.resources.reservations.devices` fixe dans `docker-compose.yml` provoquait une erreur `could not select device driver "nvidia"` sur toute machine sans NVIDIA Container Toolkit (VM, laptop sans GPU, CI). Remplace par une variable `${DOCKER_RUNTIME:-runc}` dans le champ `runtime`, pilotee par `run.sh` / `run.ps1` qui detectent `nvidia-smi` + runtime nvidia Docker au lancement.
-
-**Resultat :** GPU active automatiquement sur les machines equipees, CPU fallback propre ailleurs. Un seul `docker-compose.yml`.
-
-**Fichiers modifies :** `docker-compose.yml`, `run.sh`, `run.ps1`.
-
-### Sentinel pip deplace dans le venv
-
-Le fichier `.deps-installed` vivait a la racine du projet. Si le `.venv` etait supprime ou manquant (copie projet sans venv, rsync vers un Pi), le sentinel restait -> `run.sh` creait un venv vide mais sautait `pip install` -> crash au demarrage sur `ModuleNotFoundError`.
-
-**Correction :** le sentinel est maintenant dans `$VENV_PATH/.deps-installed`, son cycle de vie est lie au venv.
-
-**Fichiers modifies :** `run.sh`, `run.ps1`, `cleanup.sh` (suppression des sentinels legacy a la racine).
-
-### Check tkinter en amont dans run.sh
-
-Si `python3-tk` manquait sur Linux, l'utilisateur subissait tout le pipeline (venv + pip install + seed_db) avant un traceback Python obscur. Ajout d'un check `python3 -c "import tkinter"` avant la creation du venv, avec message clair par distro (apt/dnf/pacman).
-
-**Fichier modifie :** `run.sh`.
-
-### DB_FILE et OLLAMA_HOST respectent l'env utilisateur
-
-Les scripts faisaient `export DB_FILE=...` sans fallback, ecrasant toute valeur deja definie par l'utilisateur. Remplace par `${DB_FILE:-default}` en bash et `if (-not $env:DB_FILE)` en PowerShell.
-
-**Fichiers modifies :** `run.sh`, `run.ps1`.
+Les scripts faisaient `export DB_FILE=...` sans fallback, écrasant toute valeur déjà définie par l'utilisateur. Remplacé par `${DB_FILE:-default}` en bash et `if (-not $env:DB_FILE)` en PowerShell.
 
 ### Parsing `.env` plus robuste
 
-Le parser sed de `run.sh` ne retirait pas les guillemets entourants. `OLLAMA_MODEL="gemma3:1B"` devenait `"gemma3:1B"` litteralement, incluant les quotes. Ajout d'un sed pour strip les guillemets simples et doubles.
+Le parser sed de `run.sh` ne retirait pas les guillemets entourants. `OLLAMA_MODEL="gemma3:4B"` devenait `"gemma3:4B"` littéralement, incluant les quotes. Ajout d'un sed pour strip les guillemets simples et doubles.
 
-**Fichier modifie :** `run.sh`.
+### Raccourci bureau déplacé en fin de script
 
-### Auto-resolution des polices par plateforme
+La création du raccourci bureau était faite au début du script. Si l'installation plantait ensuite, l'utilisateur se retrouvait avec un raccourci vers une app cassée. La question est maintenant posée au début, mais le raccourci n'est créé qu'à la fin, une fois l'installation complètement réussie. Sur Windows, le raccourci lance PowerShell en fenêtre cachée (`-WindowStyle Hidden`) pour que seule l'application Tkinter apparaisse.
 
-Les polices `Segoe UI` et `Cascadia Code` etaient codees en dur dans `ui.py`, alors qu'elles n'existent pas sur Linux. Remplacees par 3 constantes (`FONT_FAMILY_UI`, `FONT_FAMILY_UI_SEMIBOLD`, `FONT_FAMILY_MONO`) resolues au demarrage via `tkinter.font.families()` avec des chaines de fallback : Segoe UI -> Noto Sans -> DejaVu Sans, Cascadia Code -> Cascadia Mono -> DejaVu Sans Mono.
+### Messages de lancement plus clairs
 
-**Fichiers modifies :** `app/ui.py` (10 occurrences hardcodees remplacees), `run.sh` (install auto de `fonts-cascadia-code` via apt).
+Le script affichait `Ensuring model...` à chaque lancement, même quand le modèle était déjà présent. Remplacé par deux messages distincts : `Model already available.` ou `Model not found. Downloading...`.
+
+### Cleanup legacy supprimé
+
+Après le déplacement du sentinel dans le venv, le code qui supprimait l'ancien sentinel à la racine du projet n'avait plus d'utilité. Retiré de `cleanup.sh` et `cleanup.ps1`.
+
+---
+
+## Interface utilisateur et rendu cross-platform
+
+### Auto-résolution des polices par plateforme
+
+Les polices `Segoe UI` et `Cascadia Code` étaient codées en dur dans `ui.py`, alors qu'elles n'existent pas sur Linux. Remplacées par 3 constantes (`FONT_FAMILY_UI`, `FONT_FAMILY_UI_SEMIBOLD`, `FONT_FAMILY_MONO`) résolues au démarrage via `tkinter.font.families()` avec des chaînes de fallback : `Segoe UI → Noto Sans → DejaVu Sans`, `Cascadia Code → Cascadia Mono → DejaVu Sans Mono`.
+
+### Installation automatique de `fonts-cascadia-code` sur Linux
+
+Sur Linux, `run.sh` détecte si `fonts-cascadia-code` est absent et le propose via `apt-get install`. Best-effort, skippé silencieusement si `sudo`, `apt-get` ou le paquet ne sont pas disponibles. Permet l'alignement visuel de l'éditeur avec la version Windows.
 
 ### Scaling DPI sur Linux
 
-Tk utilise 72 DPI par defaut sur X11, ce qui fait rendre tous les widgets et polices plus petits que sur Windows (qui remonte le vrai DPI). Ajout d'un `self.tk.call("tk", "scaling", 1.333)` sur non-Windows juste apres `super().__init__()` pour aligner le rendu Linux sur la baseline Windows 96 DPI.
+Tk utilise 72 DPI par défaut sur X11, ce qui fait rendre tous les widgets et polices plus petits que sur Windows (qui remonte le vrai DPI). Ajout d'un `self.tk.call("tk", "scaling", 1.333)` sur non-Windows juste après `super().__init__()` pour aligner le rendu Linux sur la baseline Windows 96 DPI.
 
-**Fichier modifie :** `app/ui.py`.
+### Bordures de boutons supprimées sur Linux
 
-### Bordures de boutons supprimees sur Linux
+`tk.Button` dessinait une bordure visible et un anneau de focus sur Linux (X11) même avec `relief="flat"`. Ajout de `borderwidth=0` et `highlightthickness=0` sur les trois `tk.Button` (toolbar, popup de mots, bouton X). Hover effect manuel via `<Enter>` / `<Leave>` sur les boutons toolbar car `activebackground` n'est pas appliqué au survol sur Linux Tk.
 
-`tk.Button` dessinait une bordure visible et un anneau de focus sur Linux (X11) meme avec `relief="flat"`. Ajout de `borderwidth=0` et `highlightthickness=0` sur les 3 `tk.Button` (toolbar, popup de mots, bouton X). Hover effect manuel via `<Enter>`/`<Leave>` sur les boutons toolbar car `activebackground` n'est pas applique au survol sur Linux Tk.
+### Documentation de la dépendance système tkinter
 
-**Fichier modifie :** `app/ui.py`.
+`requirements.txt` a une en-tête documentant que `tkinter` n'est pas installable via pip et donnant les commandes d'installation par distro. Section « Linux — additional system packages » ajoutée au README avec les commandes d'installation et de désinstallation.
 
-### Installation automatique de fonts-cascadia-code
+### Popup de correction agrandi
 
-Sur Linux, `run.sh` detecte si `fonts-cascadia-code` est absent et le propose via `apt-get install`. Best-effort, skippe silencieusement si `sudo`, `apt-get` ou le paquet ne sont pas disponibles. Permet l'alignement visuel de l'editeur avec la version Windows.
+Le popup de correction était trop petit pour afficher tout le texte corrigé. Dimensions maximales augmentées de 720×420 à 900×550 pour montrer plus de contenu sans scroller.
 
-**Fichier modifie :** `run.sh`.
+### Affichage du popup après copier-coller
 
-### Documentation de la dependance systeme tkinter
+Le popup de correction ne s'affichait pas après un copier-coller ou dans certains cas normaux, bien que les soulignements rouges apparaissent correctement. Deux bugs corrigés :
 
-`requirements.txt` a une en-tete documentant que `tkinter` n'est pas installable via pip et donnant les commandes d'installation par distro (apt, dnf, pacman). Section "Linux - additional system packages" ajoutee au README avec les commandes d'installation et de desinstallation.
+- **Ordre d'appel dans `show_fix_popup()`** : `_reposition_fix_popup()` était appelé avant `deiconify()`. Or `_reposition_fix_popup()` vérifie `winfo_viewable()` et retourne immédiatement si le popup n'est pas visible → le popup apparaissait sans jamais avoir été positionné. Correction : `deiconify()` → `update_idletasks()` → `_reposition_fix_popup()`.
+- **Curseur hors écran** : quand `bbox("insert")` retournait `None` (typiquement après un collage long), le popup était caché au lieu d'être positionné. Le popup est maintenant centré sur le widget texte en fallback.
 
-**Fichiers modifies :** `app/requirements.txt`, `README.md`.
+### Spinner de chargement
+
+Ajout d'une animation rotative dans la barre de statut pendant que l'IA travaille sur une correction. L'animation démarre quand la requête est envoyée et s'arrête quand la réponse arrive. Implémenté avec un Canvas Tkinter dessinant un arc qui tourne.
+
+---
+
+## Correction par LLM
+
+### Simplification de la correction (stages 2 et 3 supprimés)
+
+La correction par bloc utilisait trois stages : prompt normal, prompt strict (`strong=True`), puis correction ligne par ligne (`_linewise_fix`). En pratique seul le stage 1 était utile. Les stages 2 et 3 ont été supprimés, la méthode `_linewise_fix()` aussi, ce qui a grandement simplifié `request_block_fix()` et `correct_document()`.
+
+### Découpage en chunks pour les longs textes
+
+La correction automatique pendant la frappe envoyait le paragraphe entier en un seul bloc au modèle. Pour les longs textes collés sans lignes vides, cela pouvait dépasser la capacité du modèle (4096 tokens de contexte). Elle utilise maintenant `split_into_chunks()` pour découper les longs blocs en morceaux de 1600 caractères, comme le bouton « Correct All ». Les morceaux sont corrigés un par un puis réassemblés avant affichage. La constante `MAX_FIX_CHARS` (ancienne limite de troncature) a été supprimée.
+
+### Correction du bug « stale »
+
+Les corrections étaient systématiquement rejetées comme « stale » car le `doc_version` changeait à chaque touche, même si le texte du bloc n'avait pas changé. Le collage incrémentait aussi le compteur plusieurs fois. Le check de fraîcheur compare maintenant le texte réel du bloc au lieu du `doc_version`. Si le texte n'a pas changé depuis la requête, la correction est acceptée.
+
+### Protection « Correct All » sans texte
+
+Appuyer sur « Correct All » avec un éditeur vide envoyait une requête inutile au modèle. Le texte est maintenant vérifié avant tout appel au modèle, et le status affiche « No text to correct ».
+
+### Erreurs modèle visibles au lieu de « No correction needed »
+
+Quand le modèle échouait (Ollama down, timeout, etc.), l'application affichait « No correction needed » au lieu d'une erreur. Le code attrapait l'exception silencieusement et renvoyait le texte original. Les workers tracent maintenant si une exception a eu lieu (`had_error`). Si oui, le status affiche « Model error » au lieu du message trompeur. `SHOW_MODEL_ERRORS_IN_STATUS` a été activé par défaut.
 
 ### Simplification des options Ollama
 
-L'ancienne logique `_predict_limit()` scaling avec magiques (`+500` pour thinking models, `+60` overhead, `/3` ratio, `OLLAMA_NUM_PREDICT_MIN`/`MAX`) a ete entierement supprimee. Seul `temperature=0.0` reste passe explicitement a Ollama (indispensable pour avoir des corrections deterministes). `num_ctx` et `num_predict` sont laisses aux defauts du Modelfile du modele.
+L'ancienne logique `_predict_limit()` avec ses nombres magiques (`+500` pour les modèles thinking, `+60` d'overhead, `/3` ratio, `OLLAMA_NUM_PREDICT_MIN`/`MAX`) a été entièrement supprimée. Seul `temperature=0.0` reste passé explicitement à Ollama (indispensable pour avoir des corrections déterministes). `num_ctx` et `num_predict` sont laissés aux défauts du Modelfile du modèle.
 
-**Fichier modifie :** `app/ui.py` — suppression de `_predict_limit()`, `OLLAMA_NUM_PREDICT_MIN`, `OLLAMA_NUM_PREDICT_MAX`, `_env_int()`, `_env_float()`.
+### `keep_alive` pour éviter les cold starts
 
-### Ajout de keep_alive pour eviter les cold starts
+Ollama décharge le modèle après 5 min d'inactivité par défaut. Chaque correction après une pause payait alors un reload de 60+ secondes. Ajout de `keep_alive="30m"` dans `_do_chat()` pour garder le modèle en VRAM entre les appels.
 
-Ollama decharge le modele apres 5 min d'inactivite par defaut. Chaque correction apres une pause payait alors un reload de 60+ secondes. Ajout de `keep_alive="30m"` dans `_do_chat()` pour garder le modele en VRAM entre les appels.
+### Préchauffage du modèle au démarrage
 
-**Fichier modifie :** `app/ui.py` — methode `_do_chat()`.
+Au lancement de l'app, un thread de fond envoie une requête factice (`"hi"` avec `num_predict=1`) pour forcer le chargement du modèle en VRAM. Pendant que l'utilisateur tape ses premières lignes, Ollama finit de charger. Quand la première pause arrive, le modèle est déjà prêt — plus de 60 s d'attente au premier usage.
 
-### Correction du bug ponctuation empilee (!. et .!)
+### Fallback `think=False` pour les modèles non-thinking
 
-Quand l'utilisateur tapait `.` et que le LLM ajoutait `!` pour emphase, le texte corrige affichait `!.` ou `.!`. Ajout dans `post_fix_spacing()` de deux regex qui collapse ces melanges vers `.` (la ponctuation neutre de l'utilisateur privilegiee sur l'emphase ajoutee par le LLM). Les ellipses (`...`, `...!`, `!...`) sont preservees via des guards de lookahead/lookbehind.
+Le paramètre `think=False` empêche les modèles « thinking » (comme qwen3) de gaspiller des tokens en blocs de réflexion `<think>...</think>`. Les modèles qui ne supportent pas ce paramètre provoquaient une erreur silencieuse. Un `try/except TypeError` gère maintenant les deux cas : les modèles thinking reçoivent `think=False`, les autres l'ignorent.
 
-**Fichier modifie :** `app/text_utils.py` — fonction `post_fix_spacing()`.
+### Correction du bug de ponctuation empilée (`!.` et `.!`)
+
+Quand l'utilisateur tapait `.` et que le LLM ajoutait `!` pour emphase, le texte corrigé affichait `!.` ou `.!`. Ajout dans `post_fix_spacing()` de deux regex qui collapse ces mélanges vers `.` (la ponctuation neutre de l'utilisateur privilégiée sur l'emphase ajoutée par le LLM). Les ellipses (`...`, `...!`, `!...`) sont préservées via des guards de lookahead / lookbehind.
+
+### Point final ajouté dans `post_fix_capitalization()`
+
+La fonction s'assurait déjà que chaque phrase commence par une majuscule. Elle vérifie maintenant aussi que le texte se termine par une ponctuation de fin de phrase (`.`, `!` ou `?`), et ajoute un point si ce n'est pas le cas.
 
 ### Analyse performance : Gemma 3 4B sur RTX 3050 4 Go
 
-Les logs Ollama revelent que `gemma3:4B` (Q4_K_M, ~3.6 Go) ne tient pas entierement dans les 4 Go de VRAM d'une RTX 3050 Laptop apres l'overhead Windows. Resultat : Ollama split le modele en `1.8 GiB GPU` + `1.8 GiB CPU`, ce qui ralentit l'inference (transferts VRAM/RAM constants). Le modele reste utilisable mais avec une vitesse reduite. Pour une vitesse full-GPU, utiliser `gemma3:1B` via `.env` (~700 Mo, tient entierement en VRAM). Sur des GPU >= 6 Go de VRAM, le 4B passe en full-GPU et atteint sa vitesse nominale.
+Les logs Ollama révèlent que `gemma3:4B` (Q4_K_M, ~3,6 Go) ne tient pas entièrement dans les 4 Go de VRAM d'une RTX 3050 Laptop après l'overhead Windows. Résultat : Ollama split le modèle en `1,8 GiB GPU` + `1,8 GiB CPU`, ce qui ralentit l'inférence (transferts VRAM / RAM constants). Le modèle reste utilisable mais avec une vitesse réduite. Pour une vitesse full-GPU, utiliser `gemma3:1B` via `.env` (~700 Mo, tient entièrement en VRAM). Sur des GPU ≥ 6 Go de VRAM, le 4B passe en full-GPU et atteint sa vitesse nominale.
+
+---
+
+## Vocabulaire et base SQLite
+
+### Fallback SQLite pour les mots hors du cache mémoire
+
+Au démarrage, seuls les 150 000 mots les plus fréquents sont chargés en RAM pour limiter l'empreinte mémoire. Les ~50 000 mots restants en base (issus du seed `wordfreq`) étaient inaccessibles aux suggestions. Ajout d'un fallback : si la recherche RAM ne retourne aucun candidat et que le fragment fait ≥ 3 caractères, une requête SQL est faite sur la table `words` ; les résultats sont ajoutés au cache RAM et ré-classés avec le même algorithme de ranking (fréquence unigramme + bonus bigramme). Les mots rares fraîchement chargés restent en RAM pour la session et sont sauvegardés à la fermeture.
+
+---
+
+## Qualité du code et audit
+
+### Audit ligne par ligne et corrections
+
+Un audit complet de tous les fichiers a révélé plusieurs problèmes :
+
+- **`correct_document()` cassée** — utilisait encore `strong=True` et `_linewise_fix()` qui avaient été supprimés. Corrigée pour suivre le flux simplifié de `request_block_fix()`.
+- **Doublons dans `_FR_APOST_PREFIXES`** (`db.py`) — le tuple contenait 20 entrées au lieu de 10. Remplacé par 10 variantes apostrophe droite + 10 variantes apostrophe courbe.
+- **Constante inutilisée `ALLOW_UNKNOWN_WORDS`** (`ui.py`) — définie mais jamais utilisée (`db.py` la lit directement depuis l'environnement). Supprimée.
+- **Mojibake dans les commentaires** (`ui.py`) — tirets em-dash corrompus dans les commentaires `ghost_mode`. Remplacés par `--`.
+- **Mojibake dans `"Correcting..."`** — caractère ellipsis corrompu. Remplacé par `...`.
+- **Schéma SQL dupliqué** (`ui.py`) — `CREATE TABLE` et `CREATE INDEX` étaient présents dans `ui.py` alors que `seed_db.py` les crée déjà. Supprimés de `ui.py`.
+
+### Correction de l'encodage UTF-8 corrompu dans `ui.py`
+
+Le fichier contenait des caractères Unicode doublement encodés (mojibake). Les plages de caractères accentués (`À-Ö`, `Ø-ö`, `ø-ÿ`) dans les regex et les guillemets typographiques dans `PUNCT_CHARS` étaient illisibles par Python. Les regex de `get_prev_word` et `rebuild_vocab`, ainsi que le `PUNCT_CHARS`, ont été restaurés. Suppression d'un BOM invisible en ligne 1 qui causait une `SyntaxError`.
+
+### Suppression du code de compatibilité Ollama
+
+Le projet installe toujours la dernière version de la librairie `ollama` via pip. Le code de compatibilité avec les anciennes versions (format `dict` vs Pydantic, `TypeError` fallback pour `timeout`) était inutile. Nettoyé dans `llm.py` (`get_ollama_client`, `extract_chat_content`) et `ui.py` (`_ensure_model_available`).
+
+### Suppression du code mort
+
+Deux fonctionnalités étaient présentes dans le code mais désactivées par défaut et jamais utilisées :
+
+- **Ghost continuation (style Copilot)** — constantes `USE_LLM_NEXT_GHOST`, `NEXT_GHOST_*`, méthodes `request_next_ghost()`, `ask_next_ghost_plain()`, `_prepare_next_ghost()`, variables `_after_next`, `_ghost_req`. Seul le mode ghost `"word"` (suffixe de suggestion) reste.
+- **LLM word suggestions** — constantes `USE_LLM_WORD_SUGGESTIONS`, `WORD_DEBOUNCE_MS`, méthodes `request_word_suggestions()`, `ask_word_suggestions_plain()`, variables `_after_word`, `_word_req`, `word_cache`. `on_ctrl_space()` simplifié pour cycler uniquement les suggestions locales.
+
+Les suggestions de mots viennent exclusivement du vocabulaire SQLite local, jamais du LLM.
+
+### Ajout de commentaires explicatifs
+
+Commentaires ajoutés dans tous les fichiers pour faciliter la compréhension et la maintenance :
+
+- `run.ps1`, `cleanup.ps1` : variables, propriétés du raccourci desktop, sentinel pip, chemins d'artefacts, image Docker.
+- `app/db.py` : constantes (`DB_FILE`, `ALLOW_UNKNOWN_WORDS`, `_ACCENT_RE`), stopwords, cache de langue, scoring et filtrage par langue.
+- `app/llm.py` : cache client, format de réponse Pydantic.
+- `app/text_utils.py` : sections (accent handling, chunking, deduplication, LLM output cleaning, etc.), explication des regex et des heuristiques de détection de chatbot.
+- `app/suggestions.py` : paramètres inline de `rank_local_candidates`, phases prefix / fuzzy matching, tri final.
+- `app/ui.py` : palette de couleurs, handles de debounce, IDs de requête, états des suggestions / corrections, bindings clavier, popups, barre d'indice, imports, boucle de frappe, guards de correction, prompt système, spinner, méthodes de statut.
+
+### Nettoyage cosmétique
+
+Suppression des espaces excessifs utilisés pour aligner les `=` dans les scripts PowerShell et dans `ui.py` (`$root`, `$shell`, `$shortcut.*`, `$reqFile`, `$venvPath`, `$dataPath`).
+
+---
+
+## Documentation
+
+### Pseudo-code réécrit en français
+
+Le diagramme SVG contenait des descriptions informelles. Réécrit en vrai pseudo-code français avec les mots-clés standards (DÉBUT, FIN, TANT QUE, SI, ALORS, ATTENDRE, ENVOYER, RECEVOIR, AFFICHER, APPLIQUER). Suppression des `:` et `+`. L'étape 7 (vérification de la correction) clarifiée : c'est l'application qui filtre les mauvaises sorties, pas le modèle.
+
+### Corrections README
+
+- Typo : `dc AI_Notepad` → `cd AI_Notepad`.
+- Liens ajoutés vers les installateurs de Docker Desktop et Python dans la section Prerequisites.
+- Section Linux avec les commandes d'installation et de désinstallation des paquets système requis.
+
+### Correction du commentaire `.env`
+
+Le commentaire disait `override the default model chosen in app/app.py`. Le modèle est défini uniquement dans `.env`, il n'y a pas de valeur par défaut dans le code. Commentaire corrigé.
