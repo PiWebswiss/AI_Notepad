@@ -335,6 +335,11 @@ class AINotepad(tk.Tk):
         self._build_spinner()
         self._bind_keys()
         self.text.focus_set()
+        # Warm up Ollama in a background thread: sends a trivial request that
+        # forces the model to be loaded into VRAM. This happens while the user
+        # is typing their first lines, so the first real correction does not
+        # wait for the 60s+ cold start.
+        threading.Thread(target=self._warmup_model, daemon=True).start()
 
     # ---------- SQLite ----------
     def _db_open_and_load(self):
@@ -884,6 +889,26 @@ class AINotepad(tk.Tk):
             return client.chat(model=MODEL, messages=messages, options=options,
                                keep_alive="30m")
 
+    def _warmup_model(self):
+        """Send a trivial request to Ollama on startup so the model gets loaded
+        into VRAM in the background. Without this, the first real correction
+        pays the full cold-start cost (often 60s+ on laptops with small VRAM).
+        Runs in a daemon thread, fails silently if Ollama is unreachable."""
+        if not MODEL:
+            return
+        try:
+            client = get_ollama_client()
+            # num_predict=1 makes the inference return immediately after the
+            # model is loaded; we discard the output.
+            client.chat(
+                model=MODEL,
+                messages=[{"role": "user", "content": "hi"}],
+                options={"temperature": 0.0, "num_predict": 1},
+                keep_alive="30m",
+            )
+        except Exception:
+            pass
+
     def clear_ai(self):
         """Hide all AI overlays (popups, ghost, underlines) and reset correction state.
         Called on New, Open, and other actions that replace the editor content."""
@@ -1202,16 +1227,36 @@ class AINotepad(tk.Tk):
             self._index_word(w)
         # Learned data is persisted to SQLite on app close via _db_save_learned().
 
+    def _sql_prefix_lookup(self, frag: str, lang: str, limit: int = 20):
+        """Fetch words whose accent-stripped form starts with frag from SQLite.
+        Used as a fallback when the in-memory vocabulary (top 150k) has no match,
+        so rarer words still in the DB (below the RAM cap) can be suggested."""
+        if not self.db or not frag:
+            return []
+        try:
+            cur = self.db.cursor()
+            # Case-insensitive prefix match via LIKE. No accent-stripping in SQL,
+            # but the caller re-filters via strip_accents() through _index_word().
+            pattern = frag.lower() + "%"
+            cur.execute(
+                "SELECT word, freq FROM words WHERE word LIKE ? AND lang = ? "
+                "ORDER BY freq DESC LIMIT ?;",
+                (pattern, lang, limit),
+            )
+            return cur.fetchall()
+        except Exception:
+            return []
+
     def local_candidates_scored(self, frag: str, prev: str, lang: str):
-        """Rank local candidates using prefix, frequency, bigram, and fuzzy score."""
-        return rank_local_candidates(
-            frag=frag,
-            prev=prev,
-            lang=lang,
-            vocab=self.vocab,
-            bigram=self.bigram,
-            vocab_norm=self.vocab_norm,
-            vocab_by_prefix=self.vocab_by_prefix,
+        """Rank local candidates using prefix, frequency, bigram, and fuzzy score.
+
+        If the RAM lookup returns no candidates, fall back to a SQLite prefix
+        query (pulls rarer words that were not in the initial top-150k load)
+        and cache them in RAM so later keystrokes and the next session benefit."""
+        results = rank_local_candidates(
+            frag=frag, prev=prev, lang=lang,
+            vocab=self.vocab, bigram=self.bigram,
+            vocab_norm=self.vocab_norm, vocab_by_prefix=self.vocab_by_prefix,
             prefix_index_len=PREFIX_INDEX_LEN,
             enable_fuzzy=ENABLE_FUZZY,
             fuzzy_only_if_no_prefix=FUZZY_ONLY_IF_NO_PREFIX,
@@ -1220,6 +1265,29 @@ class AINotepad(tk.Tk):
             popup_max_items=POPUP_MAX_ITEMS,
             is_lang_word=is_lang_word,
         )
+        # Fallback: if nothing matched in RAM and the fragment is long enough to
+        # be meaningful (avoids hammering SQLite on every 1-2 char prefix), pull
+        # extra candidates from the full SQLite vocabulary and cache them.
+        if not results and len(frag) >= 3:
+            rows = self._sql_prefix_lookup(frag, lang, limit=20)
+            if rows:
+                for word, freq in rows:
+                    if word not in self.vocab:
+                        self.vocab[word] = int(freq)
+                        self._index_word(word)
+                results = rank_local_candidates(
+                    frag=frag, prev=prev, lang=lang,
+                    vocab=self.vocab, bigram=self.bigram,
+                    vocab_norm=self.vocab_norm, vocab_by_prefix=self.vocab_by_prefix,
+                    prefix_index_len=PREFIX_INDEX_LEN,
+                    enable_fuzzy=ENABLE_FUZZY,
+                    fuzzy_only_if_no_prefix=FUZZY_ONLY_IF_NO_PREFIX,
+                    fuzzy_min_ratio=FUZZY_MIN_RATIO,
+                    fuzzy_max_len_diff=FUZZY_MAX_LEN_DIFF,
+                    popup_max_items=POPUP_MAX_ITEMS,
+                    is_lang_word=is_lang_word,
+                )
+        return results
 
     # ---------------- Typing loop ----------------
     def on_key_release(self, event=None):
