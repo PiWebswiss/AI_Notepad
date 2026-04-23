@@ -1,5 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 1080" width="700" height="1080" font-family="Arial, sans-serif">
-
+######
+# This file was developed with the assistance of OpenAI Codex (ChatGPT).
+######
   <!-- # ===== DEFINITIONS (arrows, gradient, shadow) ===== -->
   <defs>
     <!-- # Arrow for connections -->

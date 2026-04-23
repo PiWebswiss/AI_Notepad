@@ -1,4 +1,7 @@
-﻿# This file was developed with the assistance of OpenAI Codex (ChatGPT).
+﻿######
+# This file was developed with the assistance of OpenAI Codex (ChatGPT).
+######
+
 """Database-backed language detection and language-word filtering."""
 
 import os

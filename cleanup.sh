@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
+
+######
 # This file was developed with the assistance of OpenAI Codex (ChatGPT).
+######
+
 # Exit immediately on error, treat unset variables as errors, propagate pipe failures.
 set -euo pipefail
 

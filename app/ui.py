@@ -1,4 +1,7 @@
+######
 # This file was developed with the assistance of OpenAI Codex (ChatGPT).
+######
+
 #
 # AI notepad
 # - Fast LOCAL word suggestions from SQLite vocabulary (popup + grey ghost suffix)
@@ -1742,6 +1745,12 @@ class AINotepad(tk.Tk):
                     self.fix_version = req_version
                     self.underline_diffs(start, original_snapshot, self.fix_corrected)
                     self.show_fix_popup(self.fix_corrected)
+                    # Cancel any pending block-fix timer scheduled during the long
+                    # Correct All run. Without this, that timer fires right after
+                    # the popup appears and the block-fix path hides it (flash bug).
+                    if self._after_fix:
+                        self.after_cancel(self._after_fix)
+                        self._after_fix = None
 
                 self.after(0, ui)
             finally:

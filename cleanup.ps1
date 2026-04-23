@@ -1,5 +1,9 @@
 #!/usr/bin/env pwsh
+
+######
 # This file was developed with the assistance of OpenAI Codex (ChatGPT).
+######
+
 # Stop immediately on any error instead of silently continuing.
 $ErrorActionPreference = "Stop"
 

@@ -1,5 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 720" width="900" height="720" font-family="Arial, sans-serif">
-# This file was developed with the assistance of Claude Code.
+######
+# This file was developed with the assistance of OpenAI Codex (ChatGPT).
+######
   <!-- ===== DEFINITIONS ===== -->
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">

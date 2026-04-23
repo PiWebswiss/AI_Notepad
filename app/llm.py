@@ -1,4 +1,7 @@
-﻿# This file was developed with the assistance of OpenAI Codex (ChatGPT).
+﻿######
+# This file was developed with the assistance of OpenAI Codex (ChatGPT).
+######
+
 """Ollama client helpers."""
 
 import ollama

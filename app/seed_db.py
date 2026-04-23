@@ -1,4 +1,7 @@
+######
 # This file was developed with the assistance of OpenAI Codex (ChatGPT).
+######
+
 """
 Seed the SQLite vocabulary database.
 

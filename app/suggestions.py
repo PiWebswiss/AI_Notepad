@@ -1,4 +1,7 @@
-﻿# This file was developed with the assistance of OpenAI Codex (ChatGPT).
+﻿######
+# This file was developed with the assistance of OpenAI Codex (ChatGPT).
+######
+
 """Ranking helpers for local word suggestions."""
 
 import difflib

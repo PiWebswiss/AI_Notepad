@@ -1,4 +1,7 @@
-﻿# This file was developed with the assistance of OpenAI Codex (ChatGPT).
+﻿######
+# This file was developed with the assistance of OpenAI Codex (ChatGPT).
+######
+
 """Text normalization and post-processing utilities for AI Notepad."""
 
 import re
