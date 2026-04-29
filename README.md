@@ -1,122 +1,81 @@
-# AI Notepad
+# MeteoGlobe
 
-Local Tk desktop notepad with spelling and grammar correction via Ollama. The GUI runs natively on Windows and Linux. Docker is only used for the Ollama LLM server.
+![Globe](docs/meteo_globe.png)
 
-## How it works
+Interactive 3D weather globe powered by Open-Meteo (free, no API key needed).
 
-1. **Type** your text in the editor.
-2. After ~0.65 s of inactivity, the LLM checks the current paragraph.
-3. A spinning indicator appears while the AI is working.
-4. If a correction is found, a **"Correction preview"** popup appears near your cursor — changed words are underlined in the editor.
-5. Press **TAB** to apply the correction, or **ESC** to dismiss it.
-6. Use **Correct All** (or `Ctrl+Shift+Enter`) to correct the entire document at once — the same popup appears for review before anything is changed.
+![Globe overview](docs/screenshot-globe.png)
 
-Word suggestions from the local SQLite vocabulary appear as you type — press **TAB** to accept or **Up/Down** to navigate.
+![Weather detail panel](docs/screenshot-detail.png)
 
-## Prerequisites
+## Install
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (for the Ollama LLM server)
-- [Python 3 + pip](https://www.python.org/downloads/) (dependencies install into `.venv`)
-
-### Linux — additional system packages
-
-On Linux `tkinter` is not bundled with Python and must be installed from the system package manager (it cannot be installed via `pip`).
-
-**Debian / Ubuntu:**
-```bash
-sudo apt-get install python3-tk
-```
-
-**Fedora / RHEL:**
-```bash
-sudo dnf install python3-tkinter
-```
-
-**Arch:**
-```bash
-sudo pacman -S tk
-```
-
-To uninstall it later:
+### 1. Install Docker (Raspberry Pi / Debian)
 
 ```bash
-# Debian / Ubuntu
-sudo apt-get remove python3-tk
+# Install prerequisites
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl
 
-# Fedora / RHEL
-sudo dnf remove python3-tkinter
+# Add Docker's official GPG key
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
 
-# Arch
-sudo pacman -R tk
+# Add the Docker repository
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# Install Docker Engine
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# Allow your user to run Docker without sudo
+sudo usermod -aG docker $USER
 ```
 
-## GPU acceleration
+Log out and back in (or run `newgrp docker`) for the group change to take effect.
 
-Ollama uses GPU acceleration automatically if an NVIDIA GPU and the NVIDIA Container Toolkit are available. On systems without a GPU, the model runs on CPU — no configuration needed.
-
-
-## Clone my GitHub repo
+Verify it works:
 
 ```bash
-git clone https://github.com/PiWebswiss/AI_Notepad.git
-cd AI_Notepad
+docker --version
+docker compose version
 ```
 
-## Run on Windows
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\run.ps1
-```
-
-## Run on Linux
+### 2. Clone the repository
 
 ```bash
-chmod +x ./run.sh
-./run.sh
+git clone https://github.com/PiWebswiss/meteo-globe.git
+cd meteo-globe
 ```
 
-On **first run**, the script will ask if you want a desktop shortcut. The shortcut is only created after the entire setup completes successfully.
-
-## Model configuration
-
-Set the model in `.env`:
-
-```env
-OLLAMA_MODEL=gemma3:4b
-```
-
-The model is downloaded automatically on first run. To change the model, edit `.env` and restart the app. The new model name will appear in the status bar.
-
-If `OLLAMA_MODEL` is missing or empty, the app will report an error and corrections will not run.
-
-## Execution policy (Windows only)
-
-If you want to run `.\run.ps1` directly without `-ExecutionPolicy Bypass`, allow scripts once for your user:
-
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-```
-
-To remove that permission later:
-
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser Undefined
-```
-
-## Cleanup
-Cleanup stops the Ollama container, removes downloaded models, the SQLite database, and optionally the Python virtual environment, Docker image, and desktop shortcut.
-
-### Windows
-
-```powershell
-.\cleanup.ps1
-```
-
-### Linux
+### 3. Start MeteoGlobe
 
 ```bash
-chmod +x ./cleanup.sh
-./cleanup.sh
+docker compose up -d --build
 ```
 
+Open http://localhost:3000 in your browser.
 
+## Project layout
+
+- `server.py`: FastAPI backend (weather proxy, icon serving, satellite tile caching)
+- `public/app.js`: globe UI, markers, weather panel
+- `public/icons/`: weather SVG icons (Bas Milius weather-icons, MIT — see [LICENSE-icons.md](LICENSE-icons.md)). Re-download with `python download_open_source_icons.py`.
+- `docker-compose.yml`: app container config
+
+
+## Expose via Cloudflare Tunnel (optional)
+
+To make MeteoGlobe accessible over the internet without port forwarding, use a Cloudflare Tunnel:
+
+Guide: [cloudflare-tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/)
+
+## Troubleshooting
+
+- Icons missing: make sure `public/icons/` exists in the container with SVG files.
+- Port conflict: change `3000:3000` to a free port in `docker-compose.yml`.
+- Blank globe: hard refresh (`Ctrl+F5`) to clear cached assets.

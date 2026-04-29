@@ -1,0 +1,596 @@
+﻿/******
+ * This file was developed with the assistance of Claude by Anthropic.
+ ******/
+
+/*
+  MeteoGlobe stylesheet.
+  Organized as top-to-bottom by UI zone (loading -> topbar -> panel -> controls -> screensaver),
+  followed by a hide-Cesium-credits tweak and two responsive breakpoints (<=900px tablet, <=600px phone).
+  All design tokens live in :root below so both dark-mode and spacing adjustments can be made in one spot.
+*/
+/* --- Reset & Base --- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  /* Design tokens — change these to retheme the whole app */
+  --bg: #060b1a;
+  --glass: rgba(8, 16, 38, 0.88);           /* translucent panel background */
+  --glass-border: rgba(255,255,255,0.09);
+  --glass-hover: rgba(255,255,255,0.05);
+  --accent: #3d9bff;                        /* primary accent (cold blue) */
+  --accent2: #00e5d4;                       /* secondary accent (teal) */
+  --accent-glow: rgba(61,155,255,0.22);
+  --text: #eef3ff;
+  --text-dim: #7a90b8;
+  --text-dimmer: #3d5070;
+  --radius: 20px;
+  --panel-w: 370px;                         /* weather panel width (overridden on mobile) */
+  --blur: blur(28px);                       /* backdrop blur for glass effect */
+  --shadow: 0 28px 72px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04);
+  --trans: 0.3s cubic-bezier(0.4,0,0.2,1);  /* standard ease for hovers / panel slide */
+}
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;                   /* prevent page scroll — the globe handles pan/zoom */
+  background: var(--bg);
+  font-family: 'Inter', system-ui, sans-serif;
+  color: var(--text);
+  /* Font-smoothing hints for crisper UI text on HiDPI screens */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* â”€â”€â”€ Loading Screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+#loading-screen {
+  position: fixed; inset: 0; z-index: 999;
+  background: radial-gradient(ellipse at 50% 55%, #091628 0%, var(--bg) 68%);
+  display: flex; align-items: center; justify-content: center;
+  transition: opacity 0.7s, visibility 0.7s;
+}
+#loading-screen.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+
+.loader-inner { text-align: center; }
+.loader-globe {
+  font-size: 80px;
+  animation: spin-globe 4s linear infinite;
+  display: block; margin-bottom: 28px;
+  filter: drop-shadow(0 0 24px rgba(61,155,255,0.5));
+}
+@keyframes spin-globe {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.loader-bar {
+  width: 220px; height: 3px; background: rgba(255,255,255,0.08);
+  border-radius: 99px; margin: 0 auto 14px; overflow: hidden;
+}
+.loader-fill {
+  height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent2));
+  border-radius: 99px; animation: fill-bar 2.5s ease forwards;
+  box-shadow: 0 0 12px var(--accent);
+}
+@keyframes fill-bar { to { width: 100%; } }
+.loader-text { color: var(--text-dim); font-size: 13px; letter-spacing: .08em; text-transform: uppercase; }
+
+/* â”€â”€â”€ Globe Container â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+#globe-container {
+  position: fixed; inset: 0; z-index: 0;
+  cursor: grab;
+}
+#globe-container:active { cursor: grabbing; }
+/* Hide Cesium's built-in red error panel; it positions poorly in fullscreen
+   and is mostly off-screen. We log render errors to the console and show a
+   hint via the app's own flashHint banner instead. */
+.cesium-widget-errorPanel { display: none !important; }
+
+/* â”€â”€â”€ Top Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.topbar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  height: 64px;
+  display: flex; align-items: center; gap: 16px;
+  padding: 0 20px;
+  background: linear-gradient(to bottom, rgba(6,11,26,0.95) 0%, rgba(6,11,26,0.6) 80%, transparent 100%);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+
+.app-logo {
+  display: flex; align-items: center; gap: 8px;
+  flex-shrink: 0;
+}
+.logo-icon { font-size: 22px; }
+.logo-text {
+  font-size: 17px; font-weight: 700; letter-spacing: -.02em;
+  background: linear-gradient(135deg, #fff 30%, var(--accent2));
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+
+/* Search */
+.search-box {
+  position: relative; flex: 1; max-width: 480px;
+  margin: 0 auto;
+}
+.search-box input {
+  width: 100%; height: 42px;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid var(--glass-border);
+  border-radius: 99px;
+  padding: 0 44px 0 42px;
+  color: var(--text); font-size: 14px; font-family: inherit;
+  transition: background var(--trans), border-color var(--trans);
+  outline: none;
+}
+.search-box input::placeholder { color: var(--text-dim); }
+.search-box input:focus {
+  background: rgba(255,255,255,0.1);
+  border-color: rgba(61,155,255,0.6);
+  box-shadow: 0 0 0 3px rgba(61,155,255,0.12);
+}
+.search-svg {
+  position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+  width: 17px; height: 17px; color: var(--text-dim); pointer-events: none;
+}
+.search-clear {
+  position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; color: var(--text-dim);
+  cursor: pointer; font-size: 13px; padding: 4px; line-height: 1;
+  transition: color var(--trans);
+}
+.search-clear:hover { color: var(--text); }
+
+.search-dropdown {
+  position: absolute; top: calc(100% + 8px); left: 0; right: 0; z-index: 200;
+  background: rgba(10,18,38,0.96);
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  backdrop-filter: var(--blur);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.search-result {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; cursor: pointer; gap: 12px;
+  transition: background var(--trans);
+  border-bottom: 1px solid var(--glass-border);
+}
+.search-result:last-child { border-bottom: none; }
+.search-result:hover { background: var(--glass-hover); }
+.sr-name { font-size: 14px; font-weight: 500; }
+.sr-sub { font-size: 12px; color: var(--text-dim); }
+.sr-flag { font-size: 20px; }
+.no-results { padding: 16px; text-align: center; color: var(--text-dim); font-size: 13px; }
+
+.topbar-right { flex-shrink: 0; display: flex; gap: 6px; align-items: center; }
+.lang-toggle {
+  font-size: 12px; font-weight: 700; cursor: pointer;
+  padding: 6px 12px; border-radius: 99px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15);
+  color: var(--text-dim); transition: background var(--trans), border-color var(--trans), transform 0.15s;
+  user-select: none; letter-spacing: .04em;
+}
+.lang-toggle:hover { background: rgba(255,255,255,0.14); border-color: rgba(255,255,255,0.25); transform: scale(1.04); }
+.lang-toggle:active { transform: scale(0.96); }
+.unit-toggle {
+  font-size: 14px; font-weight: 700; cursor: pointer;
+  padding: 7px 16px; border-radius: 99px;
+  background: rgba(61,155,255,0.12);
+  border: 1px solid rgba(61,155,255,0.3);
+  color: var(--accent); transition: background var(--trans), border-color var(--trans), transform 0.15s;
+  user-select: none; letter-spacing: .02em;
+}
+.unit-toggle:hover { background: rgba(61,155,255,0.22); border-color: rgba(61,155,255,0.5); transform: scale(1.04); }
+.unit-toggle:active { transform: scale(0.96); }
+
+/* â”€â”€â”€ Weather Panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+#weather-panel {
+  /* Starts off-screen (left: -420px) and slides in when .active is added */
+  position: fixed; top: 76px; left: -420px; z-index: 90;
+  width: var(--panel-w);
+  max-height: calc(100vh - 90px);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  box-shadow: var(--shadow);
+  transition: left var(--trans);
+  display: flex; flex-direction: column;
+  overflow-y: auto; overflow-x: hidden;
+}
+#weather-panel.active { left: 16px; }
+#weather-panel::before {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  opacity: 0.7;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.panel-close {
+  position: absolute; top: 14px; right: 14px; z-index: 2;
+  width: 30px; height: 30px; border-radius: 50%;
+  background: rgba(255,255,255,0.07); border: 1px solid var(--glass-border);
+  color: var(--text-dim); cursor: pointer; font-size: 13px;
+  transition: background var(--trans), color var(--trans);
+  display: flex; align-items: center; justify-content: center;
+}
+.panel-close:hover { background: rgba(255,255,255,0.14); color: var(--text); }
+
+/* Location */
+.panel-location {
+  padding: 22px 20px 0;
+}
+.panel-city {
+  font-size: 24px; font-weight: 700; letter-spacing: -.03em;
+  line-height: 1.1;
+}
+.panel-country { font-size: 13px; color: var(--text-dim); margin-top: 3px; }
+.panel-time { font-size: 12px; color: var(--text-dimmer); margin-top: 4px; letter-spacing: .02em; }
+
+/* Hero */
+.panel-hero {
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px 20px;
+}
+.hero-icon-wrap {
+  width: 88px; height: 88px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.hero-icon-wrap img, .hero-icon-wrap svg {
+  width: 88px; height: 88px; object-fit: contain;
+  filter: drop-shadow(0 4px 20px rgba(45,140,240,0.4));
+  shape-rendering: geometricPrecision;
+}
+.hero-emoji { font-size: 60px; line-height: 1; }
+.hero-right { flex: 1; }
+.hero-temp {
+  font-size: 56px; font-weight: 800; letter-spacing: -.05em;
+  line-height: 1;
+}
+.hero-desc {
+  font-size: 15px; font-weight: 500; color: var(--text-dim);
+  margin-top: 6px; text-transform: capitalize;
+}
+.hero-feels { font-size: 12px; color: var(--text-dimmer); margin-top: 4px; }
+
+/* Temperature + precipitation chart (MeteoSuisse style) */
+.temp-chart-wrap {
+  margin: 10px 16px 0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--glass-border);
+}
+.temp-chart-wrap canvas {
+  display: block;
+  width: 100%;
+  height: 150px;
+  image-rendering: -webkit-optimize-contrast;
+}
+
+/* Forecast */
+.panel-forecast {
+  flex: 1; overflow: hidden;
+  display: flex; flex-direction: column;
+  padding: 14px 20px 16px;
+}
+.forecast-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px;
+}
+.forecast-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--text-dim); }
+.data-source { font-size: 11px; color: var(--accent2); }
+
+.forecast-scroll {
+  display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;
+  scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.1) transparent;
+}
+.forecast-scroll::-webkit-scrollbar { height: 3px; }
+.forecast-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 99px; }
+
+.fc-cell {
+  flex-shrink: 0; width: 70px; padding: 10px 6px;
+  text-align: center;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  cursor: default;
+  transition: background var(--trans), border-color var(--trans), transform 0.15s;
+}
+.fc-cell:hover { background: rgba(255,255,255,0.09); border-color: rgba(255,255,255,0.14); transform: translateY(-2px); }
+.fc-time { font-size: 11px; color: var(--text-dim); margin-bottom: 6px; font-weight: 500; }
+.fc-icon { height: 36px; display: flex; align-items: center; justify-content: center; margin-bottom: 6px; }
+.fc-icon img, .fc-icon svg { width: 36px; height: 36px; object-fit: contain; shape-rendering: geometricPrecision; }
+.fc-icon span { font-size: 28px; line-height: 1; }
+.fc-temp { font-size: 14px; font-weight: 700; display: flex; gap: 4px; justify-content: center; align-items: baseline; }
+.fc-temp-min { font-size: 11px; font-weight: 500; opacity: 0.6; }
+.fc-rain { font-size: 9px; color: #5ab4ff; margin-top: 2px; min-height: 14px; }
+
+.forecast-placeholder {
+  display: flex; align-items: center; justify-content: center;
+  height: 80px; color: var(--text-dimmer); font-size: 13px;
+}
+
+/* â”€â”€â”€ Globe Controls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.controls {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  z-index: 100;
+  display: flex; gap: 2px; align-items: center;
+  background: rgba(6,12,28,0.9);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 99px;
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  padding: 5px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.03), inset 0 1px 0 rgba(255,255,255,0.06);
+}
+.ctrl-btn {
+  width: 42px; height: 42px; border-radius: 50%;
+  background: transparent; border: none;
+  color: var(--text-dim); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background var(--trans), color var(--trans), transform 0.15s;
+}
+.ctrl-btn svg { width: 18px; height: 18px; }
+.ctrl-btn:hover { background: rgba(255,255,255,0.1); color: var(--text); transform: scale(1.08); }
+.ctrl-btn:active { transform: scale(0.95); }
+.ctrl-btn.active { background: rgba(61,155,255,0.22); color: var(--accent); }
+.ctrl-btn:disabled { opacity: 0.45; cursor: default; transform: none; }
+.ctrl-btn.busy svg { animation: ctrl-spin 0.9s linear infinite; }
+.zoom-btn {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.map-attrib {
+  position: fixed;
+  right: 14px;
+  bottom: 12px;
+  z-index: 100;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+  background: rgba(5, 10, 24, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  padding: 5px 10px;
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+
+@keyframes ctrl-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* â”€â”€â”€ Hint â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.hint {
+  position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+  z-index: 100;
+  font-size: 13px; color: rgba(255,255,255,0.4);
+  background: rgba(0,0,0,0.3);
+  padding: 8px 20px; border-radius: 99px;
+  pointer-events: none;
+  transition: opacity 1s;
+}
+.hint.fade { opacity: 0; }
+
+/* â”€â”€â”€ Screensaver â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.screensaver {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  pointer-events: none;       /* let clicks through to the globe */
+  opacity: 0;
+  transition: opacity 0.9s ease;
+  background:
+    radial-gradient(ellipse at 30% 20%, rgba(45,140,240,0.18), transparent 55%),
+    radial-gradient(ellipse at 70% 80%, rgba(0,212,200,0.12), transparent 55%),
+    linear-gradient(to bottom, rgba(3,8,20,0.06), rgba(3,8,20,0.58));
+}
+.screensaver.active {
+  opacity: 1;
+  pointer-events: none;       /* do not block controls/buttons */
+}
+/* Hide UI elements during screensaver for clean globe view */
+.ss-hidden {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  transition: opacity 0.6s ease, visibility 0.6s ease !important;
+}
+.ss-card {
+  min-width: min(88vw, 420px);
+  padding: 28px 36px 24px;
+  border-radius: 26px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: linear-gradient(160deg, rgba(7,15,34,0.92), rgba(5,11,26,0.82));
+  box-shadow: 0 28px 64px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.09), 0 0 80px rgba(61,155,255,0.08);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  text-align: center;
+}
+.ss-logo {
+  font-size: clamp(1rem, 2vw, 1.2rem);
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  background: linear-gradient(135deg, rgba(200,220,255,0.9), var(--accent2));
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+.ss-clock {
+  font-size: clamp(3rem, 8vw, 5.8rem);
+  font-weight: 300;
+  letter-spacing: -0.03em;
+  color: rgba(246,251,255,0.97);
+  text-shadow: 0 0 48px rgba(61,155,255,0.28);
+  font-variant-numeric: tabular-nums;
+  margin-top: 4px;
+}
+.ss-hint {
+  font-size: 0.68rem;
+  color: rgba(200,220,255,0.45);
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  margin-top: 14px;
+}
+
+/* --- Hide Cesium credits/logo ------------------------------------------- */
+.cesium-widget-credits,
+.cesium-credit-logoContainer,
+.cesium-credit-textContainer { display: none !important; }
+
+/* â”€â”€â”€ Scrollbar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+* { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.08) transparent; }
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 99px; }
+
+/* --- Responsive breakpoints ---
+   Two tiers: tablets (<=900px) shrink the panel + icons, phones (<=600px) dock
+   the weather panel to the bottom of the screen like a sheet and hide the logo text. */
+@media (max-width: 900px) {
+  :root { --panel-w: 320px; }
+  .topbar { gap: 10px; padding: 0 14px; }
+  .search-box { max-width: 320px; }
+  .panel-city { font-size: 20px; }
+  .hero-temp { font-size: 44px; }
+  .hero-icon-wrap, .hero-icon-wrap img, .hero-icon-wrap svg { width: 72px; height: 72px; }
+  .fc-cell { width: 62px; padding: 8px 4px; }
+  .fc-icon img, .fc-icon svg { width: 30px; height: 30px; }
+  .fc-icon { height: 30px; margin-bottom: 4px; }
+}
+
+/* --- Responsive: Phones (max 600px) --- */
+@media (max-width: 600px) {
+  :root { --panel-w: calc(100vw - 24px); }
+
+  /* Panel slides up from the bottom as a sheet, docked just below the topbar.
+     Fills most of the screen while leaving the topbar visible above it. */
+  #weather-panel {
+    top: auto;
+    bottom: -110%;
+    left: 8px; right: 8px;
+    width: auto;
+    height: calc(100vh - 64px - env(safe-area-inset-bottom, 0px) - 12px);
+    max-height: none;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+    border-radius: 22px 22px 18px 18px;
+    overflow-y: auto;
+    box-shadow: 0 -12px 40px rgba(0,0,0,0.55), var(--shadow);
+  }
+  #weather-panel.active { bottom: 8px; left: 8px; }
+
+  /* Mobile drag-handle pill: repurpose ::before (accent gradient line on desktop)
+     as a small centered grab bar at the top of the sheet. */
+  #weather-panel::before {
+    top: 8px;
+    left: 50%;
+    right: auto;
+    width: 40px;
+    height: 4px;
+    background: rgba(255,255,255,0.25);
+    border-radius: 99px;
+    transform: translateX(-50%);
+    opacity: 1;
+  }
+
+  /* Topbar: compact layout */
+  .topbar { padding: 0 10px; gap: 8px; height: 54px; }
+  .logo-text { display: none; }
+  .logo-icon { font-size: 20px; }
+  .search-box { max-width: none; }
+  .search-box input { height: 36px; font-size: 13px; padding: 0 36px 0 36px; }
+  .search-svg { width: 15px; height: 15px; left: 12px; }
+  .search-clear { right: 10px; }
+
+  /* Topbar right buttons */
+  .topbar-right { gap: 4px; }
+  .lang-toggle { padding: 5px 8px; font-size: 11px; }
+  .unit-toggle { padding: 5px 10px; font-size: 12px; }
+
+  /* Controls bar */
+  .controls { bottom: 12px; gap: 1px; padding: 3px; }
+  .ctrl-btn { width: 38px; height: 38px; }
+  .ctrl-btn svg { width: 16px; height: 16px; }
+  .zoom-btn { font-size: 20px; }
+
+  /* Weather panel content. Top padding leaves room for the mobile drag-handle pill. */
+  .panel-location { padding: 22px 16px 0; }
+  .panel-city { font-size: 20px; }
+  .panel-country { font-size: 12px; }
+  .panel-hero { padding: 12px 16px; gap: 10px; }
+  .hero-icon-wrap, .hero-icon-wrap img, .hero-icon-wrap svg { width: 64px; height: 64px; }
+  .hero-temp { font-size: 42px; }
+  .hero-desc { font-size: 13px; }
+  .hero-feels { font-size: 11px; }
+
+  /* Chart */
+  .temp-chart-wrap { margin: 8px 12px 0; }
+  .temp-chart-wrap canvas { height: 120px; }
+
+  /* Forecast */
+  .panel-forecast { padding: 10px 12px 12px; }
+  .fc-cell { width: 58px; padding: 8px 4px; border-radius: 10px; }
+  .fc-time { font-size: 10px; margin-bottom: 4px; }
+  .fc-icon { height: 28px; margin-bottom: 4px; }
+  .fc-icon img, .fc-icon svg { width: 28px; height: 28px; }
+  .fc-temp { font-size: 12px; }
+  .fc-temp-min { font-size: 10px; }
+  .fc-rain { font-size: 8px; }
+
+  /* Hint and attribution */
+  .hint { bottom: 64px; font-size: 11px; padding: 6px 14px; }
+  .map-attrib { bottom: 58px; font-size: 9px; padding: 3px 8px; }
+
+  /* Screensaver */
+  .ss-card { padding: 20px 24px 18px; min-width: 80vw; }
+  .ss-clock { font-size: clamp(2.5rem, 10vw, 4rem); }
+}
+
+/* --- Responsive: Small phones (max 380px) --- */
+@media (max-width: 380px) {
+  .topbar { padding: 0 6px; gap: 6px; height: 48px; }
+  .search-box input { height: 32px; font-size: 12px; }
+  .lang-toggle { padding: 4px 6px; font-size: 10px; }
+  .unit-toggle { padding: 4px 8px; font-size: 11px; }
+  .panel-city { font-size: 18px; }
+  .hero-temp { font-size: 36px; }
+  .hero-icon-wrap, .hero-icon-wrap img, .hero-icon-wrap svg { width: 52px; height: 52px; }
+  .fc-cell { width: 52px; }
+  .ctrl-btn { width: 34px; height: 34px; }
+}
+
+/* --- Responsive: Large screens (1200px+) --- */
+@media (min-width: 1200px) {
+  :root { --panel-w: 400px; }
+  .search-box { max-width: 560px; }
+  .topbar { padding: 0 28px; }
+}
+
+/* --- Touch: ensure minimum tap target size --- */
+@media (pointer: coarse) {
+  .ctrl-btn { min-width: 44px; min-height: 44px; }
+  .search-result { padding: 14px 16px; }
+  .fc-cell { min-width: 58px; }
+  .panel-close { width: 36px; height: 36px; }
+}
+
+/* --- Landscape phones: reduce panel height --- */
+@media (max-height: 500px) and (max-width: 900px) {
+  #weather-panel { max-height: 70vh; }
+  .panel-hero { padding: 8px 16px; }
+  .hero-icon-wrap, .hero-icon-wrap img, .hero-icon-wrap svg { width: 52px; height: 52px; }
+  .hero-temp { font-size: 36px; }
+  .temp-chart-wrap canvas { height: 100px; }
+  .panel-forecast { padding: 8px 12px 10px; }
+}
+
