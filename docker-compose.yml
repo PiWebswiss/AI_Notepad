@@ -1,16 +1,29 @@
+######
+# This file was developed with the assistance of OpenAI Codex (ChatGPT).
+######
+
+# Compose topology:
+# - ollama: LLM inference API service (the GUI app runs natively on host via run.ps1)
 services:
-  meteo-globe:
-    build: .
+  ollama: # local LLM server
+    image: ollama/ollama:latest
+    container_name: AI_Notepad-ollama
     ports:
-      - "3000:3000"
-    environment:
-      PORT: 3000
-    restart: unless-stopped
+      - "11434:11434" # expose Ollama API to host
     volumes:
-      # Live-reload the public/ folder without rebuilding the image
-      - ./public:/app/public:ro
-      # Persistent disk cache for satellite/label tiles (avoids re-fetching from Esri)
-      - sat-tiles:/app/tile_cache
+      - ollama:/root/.ollama # persist downloaded models
+    # Runtime is swapped by run.sh / run.ps1: 'nvidia' when a GPU is detected
+    # on the host, 'runc' (default OCI runtime) otherwise. Keeping the default
+    # as 'runc' means the container starts fine on machines without a GPU.
+    runtime: ${DOCKER_RUNTIME:-runc}
+    # Health check: use the ollama binary (guaranteed to be in the image).
+    # Docker marks the container as healthy once this succeeds.
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
 
 volumes:
-  sat-tiles:
+  ollama: # named volume for Ollama model data
