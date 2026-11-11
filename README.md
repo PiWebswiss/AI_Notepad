@@ -2,6 +2,8 @@
 
 Local Tk desktop notepad with spelling and grammar correction via Ollama. The GUI runs natively on Windows and Linux. Docker is only used for the Ollama LLM server.
 
+[AInotepad](images/image.png)
+
 ## How it works
 
 1. **Type** your text in the editor.
